@@ -1,0 +1,5 @@
+/target
+/vendor
+/builds
+/.hypothesis
+src/board/mod.rs

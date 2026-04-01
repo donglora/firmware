@@ -1,0 +1,6 @@
+[target.'cfg(target_arch = "xtensa")']
+rustflags = [
+    "-C", "link-arg=-Wl,-Tlinkall.x",
+    "-C", "link-arg=-Wl,-Tdefmt.x",
+    "-C", "link-arg=-nostartfiles",
+]

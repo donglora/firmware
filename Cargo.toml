@@ -1,0 +1,105 @@
+[workspace]
+members = ["."]
+
+[package]
+name = "donglora"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+authors = ["Stephen Waits <steve@waits.net>"]
+license = "MIT"
+description = "Transparent LoRa radio over USB — plug in a board, talk LoRa from your host"
+repository = "https://github.com/swaits/donglora"
+keywords = ["lora", "radio", "embedded", "usb", "firmware"]
+categories = ["embedded", "hardware-support", "no-std"]
+
+# UPGRADE BLOCKED: embassy-executor 0.10 and ucobs 0.3 need Rust >= 1.93
+# stable. The ESP Xtensa toolchain (espup) is a nightly fork that may not
+# support the required language features or pass MSRV gating. Revisit when
+# espup catches up. Check: rustup run esp rustc --version
+[dependencies]
+cfg-if = "1.0"
+critical-section = "1.2"
+defmt = "1.0"
+embedded-hal-async = "1.0"
+embassy-embedded-hal = "0.6"
+embassy-executor = "0.9"
+embassy-sync = "0.8"
+embassy-time = "0.5"
+embassy-usb = { version = "0.6", features = ["defmt"] }
+embassy-usb-driver = "0.2"
+ucobs = { version = "0.3", features = ["legacy-msrv"] }
+heapless = "0.9"
+lora-phy = "3.0"
+static_cell = "2.1"
+
+# Display rendering
+display-interface = "0.5"
+embedded-graphics = "0.8"
+ssd1306 = { version = "0.10", features = ["async"] }
+
+# Async IO traits and combinators
+embedded-io-async = "0.7"
+embassy-futures = "0.1"
+
+# ESP32-S3 (Heltec V3) — requires esp toolchain (espup)
+esp-backtrace = { version = "0.18", optional = true, features = [
+  "esp32s3",
+  "panic-handler",
+  "defmt",
+] }
+esp-hal = { version = "1.0", optional = true, features = [
+  "esp32s3",
+  "unstable",
+] }
+esp-println = { version = "0.16", optional = true, features = [
+  "esp32s3",
+  "defmt-espflash",
+] }
+esp-rtos = { version = "0.2", optional = true, features = [
+  "esp32s3",
+  "embassy",
+] }
+
+# nRF52840 (RAK 4631)
+cortex-m-rt = { version = "0.7", optional = true }
+embassy-nrf = { version = "0.10", optional = true, features = [
+  "nrf52840",
+  "gpiote",
+  "time-driver-rtc1",
+  "defmt",
+] }
+panic-probe = { version = "1.0", optional = true, features = ["print-defmt"] }
+
+[build-dependencies]
+minijinja = "2.18"
+owo-colors = "4.3"
+
+[features]
+heltec_v3 = [
+  "dep:esp-backtrace",
+  "dep:esp-hal",
+  "dep:esp-println",
+  "dep:esp-rtos",
+]
+heltec_v4 = [
+  "dep:esp-backtrace",
+  "dep:esp-hal",
+  "dep:esp-println",
+  "dep:esp-rtos",
+]
+rak_wisblock_4631 = [
+  "dep:cortex-m-rt",
+  "dep:embassy-nrf",
+  "dep:panic-probe",
+  "embassy-executor/arch-cortex-m",
+  "embassy-executor/executor-thread",
+]
+
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"
+
+[profile.release]
+codegen-units = 1
+lto = "fat"
+opt-level = 3  # "s"/"z" break Xtensa (l32r literal range exceeded)
