@@ -10,9 +10,7 @@ use embassy_usb::class::cdc_acm::{CdcAcmClass, Receiver, Sender, State};
 use embassy_usb::Builder;
 use static_cell::StaticCell;
 
-use crate::channel::{
-    CommandChannel, DisplayCommand, DisplayCommandChannel, ResponseChannel,
-};
+use crate::channel::{CommandChannel, DisplayCommand, DisplayCommandChannel, ResponseChannel};
 use crate::protocol::{Command, ErrorCode, Response};
 
 const MAX_FRAME: usize = 512;
@@ -68,14 +66,7 @@ pub async fn usb_task(
     let ctrl_buf = CTRL_BUF.init([0; 64]);
     let cdc_state = CDC_STATE.init(State::new());
 
-    let mut builder = Builder::new(
-        parts.driver,
-        config,
-        desc_buf,
-        conf_buf,
-        bos_buf,
-        ctrl_buf,
-    );
+    let mut builder = Builder::new(parts.driver, config, desc_buf, conf_buf, bos_buf, ctrl_buf);
 
     let class = CdcAcmClass::new(&mut builder, cdc_state, MAX_PACKET as u16);
     let mut usb_dev = builder.build();
@@ -84,7 +75,15 @@ pub async fn usb_task(
     // ── Run USB device + protocol loop concurrently ────────────────
     join(
         usb_dev.run(),
-        protocol_loop(sender, receiver, commands, responses, display_commands, has_display, mac),
+        protocol_loop(
+            sender,
+            receiver,
+            commands,
+            responses,
+            display_commands,
+            has_display,
+            mac,
+        ),
     )
     .await;
 }
@@ -141,7 +140,12 @@ async fn protocol_loop<'d, D: embassy_usb_driver::Driver<'d>>(
                             {
                                 if let Some(cmd) = Command::from_bytes(&decode_buf[..decoded_len]) {
                                     route_command(
-                                        cmd, commands, responses, display_commands, has_display, mac,
+                                        cmd,
+                                        commands,
+                                        responses,
+                                        display_commands,
+                                        has_display,
+                                        mac,
                                     )
                                     .await;
                                 }
@@ -160,8 +164,8 @@ async fn protocol_loop<'d, D: embassy_usb_driver::Driver<'d>>(
             Either3::Second(response) => {
                 // Serialize response to fixed-size LE bytes, then COBS encode
                 let raw_len = response.write_to(&mut write_buf);
-                let encoded_len = ucobs::encode(&write_buf[..raw_len], &mut cobs_encode_buf)
-                    .unwrap_or(0);
+                let encoded_len =
+                    ucobs::encode(&write_buf[..raw_len], &mut cobs_encode_buf).unwrap_or(0);
                 // Append 0x00 sentinel
                 if encoded_len < cobs_encode_buf.len() {
                     cobs_encode_buf[encoded_len] = 0x00;

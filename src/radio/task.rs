@@ -125,9 +125,7 @@ pub async fn radio_task(
                             warn!("restart RX failed: {}", e);
                             state.state = RadioState::Idle;
                             status.sender().send(state.clone());
-                            responses
-                                .send(Response::Error(ErrorCode::RadioBusy))
-                                .await;
+                            responses.send(Response::Error(ErrorCode::RadioBusy)).await;
                         }
                     }
                     Err(e) => {
@@ -135,9 +133,7 @@ pub async fn radio_task(
                         if start_rx(&mut lora, &cfg).await.is_err() {
                             state.state = RadioState::Idle;
                             status.sender().send(state.clone());
-                            responses
-                                .send(Response::Error(ErrorCode::RadioBusy))
-                                .await;
+                            responses.send(Response::Error(ErrorCode::RadioBusy)).await;
                         }
                     }
                 },
@@ -218,7 +214,9 @@ async fn handle_cmd(
         }
         Command::DisplayOn | Command::DisplayOff | Command::GetMac => {}
         Command::Transmit { config, payload } => {
-            let tx_config = config.map(|c| c.resolve(Board::TX_POWER_RANGE)).or(state.config);
+            let tx_config = config
+                .map(|c| c.resolve(Board::TX_POWER_RANGE))
+                .or(state.config);
             if let Some(cfg) = tx_config {
                 if let Err(reason) = cfg.validate(Board::TX_POWER_RANGE) {
                     warn!("TX config rejected: {}", reason);
@@ -239,9 +237,7 @@ async fn handle_cmd(
                     }
                     Err(e) => {
                         warn!("TX failed: {}", e);
-                        responses
-                            .send(Response::Error(ErrorCode::TxTimeout))
-                            .await;
+                        responses.send(Response::Error(ErrorCode::TxTimeout)).await;
                     }
                 }
 
@@ -331,7 +327,12 @@ fn modulation_params(
 async fn start_rx(lora: &mut Radio, cfg: &RadioConfig) -> Result<(), RadioError> {
     let mdltn = modulation_params(lora, cfg)?;
     let pkt = lora.create_rx_packet_params(
-        cfg.preamble_len, IMPLICIT_HEADER, MAX_PAYLOAD as u8, CRC_ON, IQ_INVERTED, &mdltn,
+        cfg.preamble_len,
+        IMPLICIT_HEADER,
+        MAX_PAYLOAD as u8,
+        CRC_ON,
+        IQ_INVERTED,
+        &mdltn,
     )?;
     lora.prepare_for_rx(RxMode::Continuous, &mdltn, &pkt).await
 }
@@ -343,7 +344,12 @@ async fn rx_once(
 ) -> Result<(u8, lora_phy::mod_params::PacketStatus), RadioError> {
     let mdltn = modulation_params(lora, cfg)?;
     let pkt = lora.create_rx_packet_params(
-        cfg.preamble_len, IMPLICIT_HEADER, MAX_PAYLOAD as u8, CRC_ON, IQ_INVERTED, &mdltn,
+        cfg.preamble_len,
+        IMPLICIT_HEADER,
+        MAX_PAYLOAD as u8,
+        CRC_ON,
+        IQ_INVERTED,
+        &mdltn,
     )?;
     lora.rx(&pkt, buf).await
 }
@@ -368,7 +374,11 @@ async fn do_tx(lora: &mut Radio, cfg: &RadioConfig, payload: &[u8]) -> Result<()
     }
 
     let mut tx_pkt = lora.create_tx_packet_params(
-        cfg.preamble_len, IMPLICIT_HEADER, CRC_ON, IQ_INVERTED, &mdltn,
+        cfg.preamble_len,
+        IMPLICIT_HEADER,
+        CRC_ON,
+        IQ_INVERTED,
+        &mdltn,
     )?;
     lora.prepare_for_tx(&mdltn, &mut tx_pkt, cfg.tx_power_dbm as i32, payload)
         .await?;

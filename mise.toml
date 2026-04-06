@@ -3,6 +3,7 @@ rust = "1.93"
 just = "latest"
 
 "cargo:cargo-binutils" = "latest"   # `cargo size`, `cargo objdump`, etc.
+"cargo:cargo-hex-to-uf2" = "latest" # ELF → UF2 via Intel HEX for nRF52840 DFU
 "cargo:espup" = "0.16"
 "cargo:espflash" = "3"              # 4.x has broken nix dependency on current stable Rust
 "cargo:probe-rs-tools" = "0.31"

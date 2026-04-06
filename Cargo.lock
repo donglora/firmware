@@ -111,6 +111,7 @@ checksum = "8ec610d8f49840a5b376c69663b6369e71f4b34484b9b2eb29fb918d92516cb9"
 dependencies = [
  "bare-metal",
  "bitfield 0.13.2",
+ "critical-section",
  "embedded-hal 0.2.7",
  "volatile-register",
 ]
@@ -302,6 +303,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "defmt-rtt"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "93d5a25c99d89c40f5676bec8cefe0614f17f0f40e916f98e345dae941807f9e"
+dependencies = [
+ "critical-section",
+ "defmt 1.0.1",
+]
+
+[[package]]
 name = "delegate"
 version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -364,9 +375,11 @@ name = "donglora"
 version = "0.1.0"
 dependencies = [
  "cfg-if",
+ "cortex-m",
  "cortex-m-rt",
  "critical-section",
  "defmt 1.0.1",
+ "defmt-rtt",
  "display-interface",
  "embassy-embedded-hal 0.6.0",
  "embassy-executor",

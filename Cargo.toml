@@ -62,7 +62,9 @@ esp-rtos = { version = "0.2", optional = true, features = [
 ] }
 
 # nRF52840 (RAK 4631)
-cortex-m-rt = { version = "0.7", optional = true }
+cortex-m = { version = "0.7", optional = true, features = ["critical-section-single-core"] }
+cortex-m-rt = { version = "0.7", optional = true, features = ["set-vtor"] }
+defmt-rtt = { version = "1.0", optional = true }
 embassy-nrf = { version = "0.10", optional = true, features = [
   "nrf52840",
   "gpiote",
@@ -89,7 +91,18 @@ heltec_v4 = [
   "dep:esp-rtos",
 ]
 rak_wisblock_4631 = [
+  "dep:cortex-m",
   "dep:cortex-m-rt",
+  "dep:defmt-rtt",
+  "dep:embassy-nrf",
+  "dep:panic-probe",
+  "embassy-executor/arch-cortex-m",
+  "embassy-executor/executor-thread",
+]
+wio_tracker_l1 = [
+  "dep:cortex-m",
+  "dep:cortex-m-rt",
+  "dep:defmt-rtt",
   "dep:embassy-nrf",
   "dep:panic-probe",
   "embassy-executor/arch-cortex-m",

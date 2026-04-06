@@ -4,3 +4,9 @@ rustflags = [
     "-C", "link-arg=-Wl,-Tdefmt.x",
     "-C", "link-arg=-nostartfiles",
 ]
+
+[target.thumbv7em-none-eabihf]
+rustflags = [
+    "-C", "link-arg=-Tlink.x",
+    "-C", "link-arg=-Tdefmt.x",
+]

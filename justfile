@@ -6,11 +6,12 @@ set shell := ["bash", "-c"]
 heltec_v3 := "heltec_v3 xtensa-esp32s3-none-elf esp32s3"
 heltec_v4 := "heltec_v4 xtensa-esp32s3-none-elf esp32s3"
 rak_wisblock_4631  := "rak_wisblock_4631 thumbv7em-none-eabihf nRF52840_xxAA"
+wio_tracker_l1     := "wio_tracker_l1 thumbv7em-none-eabihf nRF52840_xxAA"
 
 builds_dir := "builds"
 
 # All known boards
-boards := "heltec_v3 heltec_v4 rak_wisblock_4631"
+boards := "heltec_v3 heltec_v4 rak_wisblock_4631 wio_tracker_l1"
 
 # Install all required tools and toolchains
 setup:
@@ -65,7 +66,7 @@ build board profile="release":
     @just _cargo {{board}} "build --{{profile}}"
     @just _copy_firmware {{board}} {{profile}}
 
-# Build and flash a board (espflash for Xtensa, probe-rs for ARM)
+# Build and flash a board (espflash for Xtensa, UF2 DFU for ARM)
 flash board:
     @just _ensure_tools
     @just build {{board}} release
@@ -80,8 +81,15 @@ flash board:
                 echo "No port found, falling back to espflash auto-detection..." >&2; \
                 espflash flash "{{builds_dir}}/donglora-{{board}}-release.elf"; \
             fi ;; \
-        *) probe-rs run --chip $chip "{{builds_dir}}/donglora-{{board}}-release.elf" ;; \
+        *) just _flash_uf2 {{board}} ;; \
     esac
+
+# Flash ARM board via debug probe (requires J-Link or similar)
+flash-probe board:
+    @just _ensure_tools
+    @just build {{board}} release
+    @read -r feat target chip <<< "$(just _info {{board}})"; \
+    probe-rs run --chip $chip "{{builds_dir}}/donglora-{{board}}-release.elf"
 
 # Show binary size for a release build
 size board:
@@ -163,11 +171,38 @@ _copy_firmware board profile:
     @read -r feat target chip <<< "$(just _info {{board}})"; \
     src="target/$target/{{profile}}/donglora"; \
     dst="{{builds_dir}}/donglora-{{board}}-{{profile}}"; \
-    if [ -f "$src" ]; then cp "$src" "$dst.elf"; echo "→ $dst.elf"; fi
+    if [ -f "$src" ]; then \
+        cp "$src" "$dst.elf"; echo "→ $dst.elf"; \
+        case "$target" in \
+            thumbv7em-*) \
+                mise exec -- rust-objcopy -O ihex "$src" "$dst.hex"; \
+                mise exec -- cargo-hex-to-uf2 hex-to-uf2 --input-path "$dst.hex" --output-path "$dst.uf2" --family nrf52840; \
+                rm "$dst.hex"; \
+                echo "→ $dst.uf2"; \
+                ;; \
+        esac; \
+    fi
+
+# Copy UF2 to a mounted UF2 bootloader drive
+[private]
+_flash_uf2 board:
+    @uf2="{{builds_dir}}/donglora-{{board}}-release.uf2"; \
+    if [ ! -f "$uf2" ]; then \
+        echo "error: $uf2 not found — run 'just build {{board}}' first" >&2; exit 1; \
+    fi; \
+    mnt="$(find /run/media -maxdepth 3 -name INFO_UF2.TXT -printf '%h\n' -quit 2>/dev/null)"; \
+    if [ -z "$mnt" ]; then \
+        echo "error: no UF2 drive found — double-tap reset to enter bootloader" >&2; exit 1; \
+    fi; \
+    echo "Copying to $mnt ..."; \
+    cp "$uf2" "$mnt/"; \
+    sync; \
+    echo "Done — board will reboot automatically"
 
 [private]
 _info name:
     @if [ "{{name}}" == "heltec_v3" ]; then echo "{{heltec_v3}}"; \
      elif [ "{{name}}" == "heltec_v4" ]; then echo "{{heltec_v4}}"; \
      elif [ "{{name}}" == "rak_wisblock_4631" ]; then echo "{{rak_wisblock_4631}}"; \
+     elif [ "{{name}}" == "wio_tracker_l1" ]; then echo "{{wio_tracker_l1}}"; \
      else echo "Unknown board: {{name}}" >&2; exit 1; fi

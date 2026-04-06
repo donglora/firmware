@@ -31,7 +31,7 @@ pub type RadioDriver = Sx126x<RadioSpiDevice, Iv, Sx1262>;
 /// USB driver for CDC-ACM.
 pub type UsbDriver = Driver<'static, &'static embassy_nrf::usb::vbus_detect::SoftwareVbusDetect>;
 
-/// I2C bus for an optional SSD1306 OLED.
+/// I2C bus for SH1106 OLED.
 pub type DisplayI2c = Twim<'static>;
 
 // ── Peripheral bundles ───────────────────────────────────────────────
@@ -57,11 +57,14 @@ pub struct Board {
 }
 
 impl super::traits::LoRaBoard for Board {
-    const NAME: &'static str = "RAK WisBlock 4631";
+    const NAME: &'static str = "Wio Tracker L1";
     const TX_POWER_RANGE: (i8, i8) = (-9, 22);
 
     fn init() -> Self {
-        let p = embassy_nrf::init(Default::default());
+        let mut config = embassy_nrf::config::Config::default();
+        config.hfclk_source = embassy_nrf::config::HfclkSource::ExternalXtal;
+        config.lfclk_source = embassy_nrf::config::LfclkSource::ExternalXtal;
+        let p = embassy_nrf::init(config);
         Self { p }
     }
 
@@ -93,26 +96,28 @@ impl Board {
         // ── SPI bus for SX1262 ───────────────────────────────────
         let mut spi_cfg = spim::Config::default();
         spi_cfg.frequency = spim::Frequency::M1;
-        let spi = Spim::new(p.SPI3, Irqs, p.P1_11, p.P1_13, p.P1_12, spi_cfg);
+        let spi = Spim::new(p.SPI3, Irqs, p.P0_30, p.P0_03, p.P0_28, spi_cfg);
 
         static SPI_BUS: StaticCell<embassy_sync::mutex::Mutex<NoopRawMutex, SpiBus>> =
             StaticCell::new();
         let spi_bus = SPI_BUS.init(embassy_sync::mutex::Mutex::new(spi));
 
-        let nss = Output::new(p.P1_10, Level::High, OutputDrive::Standard);
+        let nss = Output::new(p.P1_14, Level::High, OutputDrive::Standard);
         let spi_device = SpiDevice::new(spi_bus, nss);
 
         // ── SX1262 control pins ──────────────────────────────────
-        let reset = Output::new(p.P1_06, Level::High, OutputDrive::Standard);
-        let dio1 = Input::new(p.P1_15, Pull::Down);
-        let busy = Input::new(p.P1_14, Pull::Down);
+        let reset = Output::new(p.P1_07, Level::High, OutputDrive::Standard);
+        let dio1 = Input::new(p.P0_07, Pull::Down);
+        let busy = Input::new(p.P1_10, Pull::Down);
 
-        let iv = GenericSx126xInterfaceVariant::new(reset, dio1, busy, None, None)
+        // RF switch: RXEN on P1.08 (GPIO, toggled by lora_phy), TX via DIO2 (SX1262 internal).
+        let rx_enable = Output::new(p.P1_08, Level::Low, OutputDrive::Standard);
+        let iv = GenericSx126xInterfaceVariant::new(reset, dio1, busy, Some(rx_enable), None)
             .expect("SX1262 interface init");
 
         let sx_config = sx126x::Config {
             chip: Sx1262,
-            tcxo_ctrl: Some(sx126x::TcxoCtrlVoltage::Ctrl1V7),
+            tcxo_ctrl: Some(sx126x::TcxoCtrlVoltage::Ctrl1V8),
             use_dcdc: true,
             rx_boost: false,
         };
@@ -126,19 +131,21 @@ impl Board {
         static VBUS: StaticCell<embassy_nrf::usb::vbus_detect::SoftwareVbusDetect> =
             StaticCell::new();
         let vbus = VBUS.init(embassy_nrf::usb::vbus_detect::SoftwareVbusDetect::new(
-            true, false,
+            true, true,
         ));
         let usb = UsbParts {
             driver: Driver::new(p.USBD, Irqs, vbus),
         };
 
-        // ── Display (optional RAK1921 SSD1306 OLED on I2C) ──────
-        // Always provide the I2C bus; display_task detects presence
-        // via SSD1306 init (fails gracefully if no display attached).
+        // ── BAT_CTL: P0.04, active HIGH — enables power to OLED and battery sense
+        let bat_ctl = Output::new(p.P0_04, Level::High, OutputDrive::Standard);
+        core::mem::forget(bat_ctl);
+
+        // ── Display (SH1106 OLED on I2C) ─────────────────────────
         static TWIM_BUF: StaticCell<[u8; 256]> = StaticCell::new();
         let twim_buf = TWIM_BUF.init([0u8; 256]);
         let i2c_cfg = twim::Config::default();
-        let i2c = Twim::new(p.TWISPI0, Irqs, p.P0_13, p.P0_14, i2c_cfg, twim_buf);
+        let i2c = Twim::new(p.TWISPI0, Irqs, p.P0_06, p.P0_05, i2c_cfg, twim_buf);
         let mac = Self::mac_address();
         let display = Some(DisplayParts { i2c, mac });
 

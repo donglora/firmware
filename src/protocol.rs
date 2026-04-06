@@ -17,7 +17,6 @@ pub const TX_POWER_MAX: i8 = i8::MIN; // -128 on the wire
 /// Sentinel value for `preamble_len`: use the firmware default (16 symbols).
 pub const PREAMBLE_DEFAULT: u16 = 0;
 
-
 /// LoRa signal bandwidth.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(not(test), derive(defmt::Format))]
@@ -188,7 +187,10 @@ impl Command {
                 let (config, pos) = if rest[0] == 0 {
                     (None, 1)
                 } else if rest[0] == 1 && rest.len() > RADIO_CONFIG_SIZE {
-                    (Some(RadioConfig::from_bytes(&rest[1..])?), 1 + RADIO_CONFIG_SIZE)
+                    (
+                        Some(RadioConfig::from_bytes(&rest[1..])?),
+                        1 + RADIO_CONFIG_SIZE,
+                    )
                 } else {
                     return None;
                 };
@@ -370,7 +372,10 @@ mod tests {
         let power_range = (-9, 22);
         let base = make_config();
 
-        let mut cfg = RadioConfig { freq_hz: 150_000_000, ..base };
+        let mut cfg = RadioConfig {
+            freq_hz: 150_000_000,
+            ..base
+        };
         assert!(cfg.validate(power_range).is_ok());
 
         cfg.freq_hz = 960_000_000;
@@ -392,7 +397,9 @@ mod tests {
             assert!(RadioConfig { sf, ..base }.validate(power_range).is_ok());
         }
         assert!(RadioConfig { sf: 4, ..base }.validate(power_range).is_err());
-        assert!(RadioConfig { sf: 13, ..base }.validate(power_range).is_err());
+        assert!(RadioConfig { sf: 13, ..base }
+            .validate(power_range)
+            .is_err());
     }
 
     #[test]
@@ -409,22 +416,34 @@ mod tests {
 
     #[test]
     fn validate_tx_power_max_sentinel() {
-        let cfg = RadioConfig { tx_power_dbm: TX_POWER_MAX, ..make_config() };
+        let cfg = RadioConfig {
+            tx_power_dbm: TX_POWER_MAX,
+            ..make_config()
+        };
         assert!(cfg.validate((-9, 22)).is_ok());
     }
 
     #[test]
     fn validate_tx_power_out_of_range() {
-        let cfg = RadioConfig { tx_power_dbm: 23, ..make_config() };
+        let cfg = RadioConfig {
+            tx_power_dbm: 23,
+            ..make_config()
+        };
         assert!(cfg.validate((-9, 22)).is_err());
 
-        let cfg = RadioConfig { tx_power_dbm: -10, ..make_config() };
+        let cfg = RadioConfig {
+            tx_power_dbm: -10,
+            ..make_config()
+        };
         assert!(cfg.validate((-9, 22)).is_err());
     }
 
     #[test]
     fn validate_preamble_default_sentinel() {
-        let cfg = RadioConfig { preamble_len: PREAMBLE_DEFAULT, ..make_config() };
+        let cfg = RadioConfig {
+            preamble_len: PREAMBLE_DEFAULT,
+            ..make_config()
+        };
         assert!(cfg.validate((-9, 22)).is_ok());
     }
 
@@ -433,33 +452,55 @@ mod tests {
         let power_range = (-9, 22);
         let base = make_config();
 
-        assert!(RadioConfig { preamble_len: 6, ..base }.validate(power_range).is_ok());
-        assert!(RadioConfig { preamble_len: 5, ..base }.validate(power_range).is_err());
+        assert!(RadioConfig {
+            preamble_len: 6,
+            ..base
+        }
+        .validate(power_range)
+        .is_ok());
+        assert!(RadioConfig {
+            preamble_len: 5,
+            ..base
+        }
+        .validate(power_range)
+        .is_err());
     }
 
     // ── RadioConfig::resolve ──────────────────────────────────────
 
     #[test]
     fn resolve_power_max_sentinel() {
-        let cfg = RadioConfig { tx_power_dbm: TX_POWER_MAX, ..make_config() };
+        let cfg = RadioConfig {
+            tx_power_dbm: TX_POWER_MAX,
+            ..make_config()
+        };
         assert_eq!(cfg.resolve((-9, 22)).tx_power_dbm, 22);
     }
 
     #[test]
     fn resolve_power_explicit_unchanged() {
-        let cfg = RadioConfig { tx_power_dbm: 10, ..make_config() };
+        let cfg = RadioConfig {
+            tx_power_dbm: 10,
+            ..make_config()
+        };
         assert_eq!(cfg.resolve((-9, 22)).tx_power_dbm, 10);
     }
 
     #[test]
     fn resolve_preamble_default() {
-        let cfg = RadioConfig { preamble_len: PREAMBLE_DEFAULT, ..make_config() };
+        let cfg = RadioConfig {
+            preamble_len: PREAMBLE_DEFAULT,
+            ..make_config()
+        };
         assert_eq!(cfg.resolve((-9, 22)).preamble_len, 16);
     }
 
     #[test]
     fn resolve_preamble_explicit_unchanged() {
-        let cfg = RadioConfig { preamble_len: 32, ..make_config() };
+        let cfg = RadioConfig {
+            preamble_len: 32,
+            ..make_config()
+        };
         assert_eq!(cfg.resolve((-9, 22)).preamble_len, 32);
     }
 
@@ -608,7 +649,12 @@ mod tests {
         let mut payload = Vec::new();
         let _ = payload.extend_from_slice(b"data");
         let mut buf = [0u8; 64];
-        let n = Response::RxPacket { rssi: -80, snr: 10, payload }.write_to(&mut buf);
+        let n = Response::RxPacket {
+            rssi: -80,
+            snr: 10,
+            payload,
+        }
+        .write_to(&mut buf);
         assert_eq!(n, 7 + 4); // tag(1) + rssi(2) + snr(2) + len(2) + "data"(4)
         assert_eq!(buf[0], 2);
         assert_eq!(i16::from_le_bytes([buf[1], buf[2]]), -80);

@@ -37,8 +37,7 @@ impl Board {
         core::mem::forget(vext); // hold pin low permanently; drop would reset it
 
         let radio = esp32s3::init_radio(
-            p.SPI2, p.DMA_CH0, p.GPIO9, p.GPIO10, p.GPIO11, p.GPIO8, p.GPIO12, p.GPIO14,
-            p.GPIO13,
+            p.SPI2, p.DMA_CH0, p.GPIO9, p.GPIO10, p.GPIO11, p.GPIO8, p.GPIO12, p.GPIO14, p.GPIO13,
         );
 
         // Note: switches internal USB PHY from Serial-JTAG to OTG.

@@ -50,8 +50,7 @@ fn main() {
     }
 
     let mut env = Environment::new();
-    let template =
-        fs::read_to_string("src/board/mod.rs.j2").expect("missing src/board/mod.rs.j2");
+    let template = fs::read_to_string("src/board/mod.rs.j2").expect("missing src/board/mod.rs.j2");
     env.add_template("mod", &template)
         .expect("failed to parse board template");
     let rendered = env
@@ -63,4 +62,17 @@ fn main() {
 
     println!("cargo:rerun-if-changed=src/board/mod.rs.j2");
     println!("cargo:rerun-if-changed={}", board_dir);
+
+    // cortex-m-rt's link.x does `INCLUDE memory.x`. Copy our nRF layout into
+    // OUT_DIR (which cortex-m-rt already adds to the linker search path) so it's
+    // only visible to ARM builds. Keeping it out of the project root prevents
+    // the linker from shadowing esp-hal's generated memory.x on Xtensa builds.
+    let target = std::env::var("TARGET").unwrap_or_default();
+    if !target.starts_with("xtensa") {
+        let out_dir = std::env::var("OUT_DIR").unwrap();
+        fs::copy("ld/nrf52840-memory.x", format!("{out_dir}/memory.x"))
+            .expect("failed to copy ld/nrf52840-memory.x");
+        println!("cargo:rustc-link-search={out_dir}");
+    }
+    println!("cargo:rerun-if-changed=ld/nrf52840-memory.x");
 }

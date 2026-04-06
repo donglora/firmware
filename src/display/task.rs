@@ -1,15 +1,11 @@
 use embassy_executor::task;
 use embassy_futures::select::{select3, Either3};
 use embassy_time::Timer;
-use ssd1306::mode::DisplayConfigAsync;
-use ssd1306::prelude::DisplayRotation;
-use ssd1306::size::DisplaySize128x64;
-use ssd1306::{I2CDisplayInterface, Ssd1306Async};
+use embedded_graphics::draw_target::DrawTarget;
+use embedded_graphics::pixelcolor::BinaryColor;
 
 use crate::board::DisplayParts;
-use crate::channel::{
-    DisplayCommand, DisplayCommandChannel, RadioState, RadioStatus, StatusWatch,
-};
+use crate::channel::{DisplayCommand, DisplayCommandChannel, RadioState, RadioStatus, StatusWatch};
 
 use crate::board::{Board, LoRaBoard};
 
@@ -80,6 +76,28 @@ impl DisplayState {
     }
 }
 
+/// Render the appropriate screen for the current state into the display buffer.
+fn render_current(
+    display: &mut impl DrawTarget<Color = BinaryColor>,
+    state: &DisplayState,
+    board: &render::BoardInfo<'_>,
+) {
+    if state.is_active() {
+        render::dashboard(
+            display,
+            &state.last_status,
+            &state.rssi_history,
+            &state.tx_history,
+            state.rssi_count,
+            state.current_slot_rssi,
+            state.current_slot_tx,
+            board,
+        );
+    } else {
+        render::splash(display, board);
+    }
+}
+
 #[task]
 pub async fn display_task(
     parts: DisplayParts,
@@ -103,20 +121,51 @@ pub async fn display_task(
         mac: &mac_str,
     };
 
-    let interface = I2CDisplayInterface::new(parts.i2c);
-    let mut display = Ssd1306Async::new(interface, DisplaySize128x64, DisplayRotation::Rotate0)
-        .into_buffered_graphics_mode();
+    cfg_if::cfg_if! {
+        if #[cfg(feature = "wio_tracker_l1")] {
+            let mut display = super::sh1106::Sh1106::new(parts.i2c, 0x3D);
 
-    if display.init().await.is_err() {
-        defmt::error!("SSD1306 init failed");
-        return;
-    }
-    if display
-        .set_brightness(ssd1306::prelude::Brightness::BRIGHTEST)
-        .await
-        .is_err()
-    {
-        defmt::warn!("display brightness set failed");
+            Timer::after_millis(100).await;
+
+            if display.init().await.is_err() {
+                defmt::error!("SH1106 init failed — retrying");
+                Timer::after_millis(500).await;
+                if display.init().await.is_err() {
+                    defmt::error!("SH1106 init failed twice, giving up");
+                    return;
+                }
+            }
+            if display.set_brightness(0xFF).await.is_err() {
+                defmt::warn!("display brightness set failed");
+            }
+        } else {
+            use ssd1306::mode::DisplayConfigAsync;
+            use ssd1306::prelude::DisplayRotation;
+            use ssd1306::size::DisplaySize128x64;
+            use ssd1306::{I2CDisplayInterface, Ssd1306Async};
+
+            let interface = I2CDisplayInterface::new(parts.i2c);
+            let mut display = Ssd1306Async::new(interface, DisplaySize128x64, DisplayRotation::Rotate0)
+                .into_buffered_graphics_mode();
+
+            Timer::after_millis(100).await;
+
+            if display.init().await.is_err() {
+                defmt::error!("SSD1306 init failed — retrying");
+                Timer::after_millis(500).await;
+                if display.init().await.is_err() {
+                    defmt::error!("SSD1306 init failed twice, giving up");
+                    return;
+                }
+            }
+            if display
+                .set_brightness(ssd1306::prelude::Brightness::BRIGHTEST)
+                .await
+                .is_err()
+            {
+                defmt::warn!("display brightness set failed");
+            }
+        }
     }
 
     let mut state = DisplayState::new();
@@ -126,7 +175,8 @@ pub async fn display_task(
     };
 
     // Show splash/waiting screen
-    render_splash(&mut display, &board_info).await;
+    render::splash(&mut display, &board_info);
+    let _ = display.flush().await;
 
     loop {
         match select3(
@@ -151,7 +201,8 @@ pub async fn display_task(
                 state.last_status = radio_status;
 
                 if state.display_on {
-                    render_current(&mut display, &state, &board_info).await;
+                    render_current(&mut display, &state, &board_info);
+                    let _ = display.flush().await;
                 }
             }
             Either3::Second(cmd) => match cmd {
@@ -167,73 +218,23 @@ pub async fn display_task(
                     if let Some(s) = receiver.try_get() {
                         state.last_status = s;
                     }
-                    render_current(&mut display, &state, &board_info).await;
+                    render_current(&mut display, &state, &board_info);
+                    let _ = display.flush().await;
                 }
                 DisplayCommand::Reset => {
                     state = DisplayState::new();
-                    render_splash(&mut display, &board_info).await;
+                    render::splash(&mut display, &board_info);
+                    let _ = display.flush().await;
                 }
             },
             Either3::Third(()) => {
                 // Timer tick: advance sparkline slot
                 state.advance_slot();
                 if state.display_on && state.is_active() {
-                    render_dashboard(&mut display, &state, &board_info).await;
+                    render_current(&mut display, &state, &board_info);
+                    let _ = display.flush().await;
                 }
             }
         }
     }
-}
-
-// The concrete display type is verbose but avoids making this generic
-// over both DrawTarget and the SSD1306-specific flush method.
-type Display<I> = ssd1306::Ssd1306Async<
-    I,
-    DisplaySize128x64,
-    ssd1306::mode::BufferedGraphicsModeAsync<DisplaySize128x64>,
->;
-
-/// Render the appropriate screen (active dashboard or splash) and flush.
-async fn render_current<I>(
-    display: &mut Display<I>,
-    state: &DisplayState,
-    board: &render::BoardInfo<'_>,
-) where
-    I: display_interface::AsyncWriteOnlyDataCommand,
-{
-    if state.is_active() {
-        render_dashboard(display, state, board).await;
-    } else {
-        render_splash(display, board).await;
-    }
-}
-
-/// Render the active dashboard and flush.
-async fn render_dashboard<I>(
-    display: &mut Display<I>,
-    state: &DisplayState,
-    board: &render::BoardInfo<'_>,
-) where
-    I: display_interface::AsyncWriteOnlyDataCommand,
-{
-    render::dashboard(
-        display,
-        &state.last_status,
-        &state.rssi_history,
-        &state.tx_history,
-        state.rssi_count,
-        state.current_slot_rssi,
-        state.current_slot_tx,
-        board,
-    );
-    let _ = display.flush().await;
-}
-
-/// Render the splash/waiting screen and flush.
-async fn render_splash<I>(display: &mut Display<I>, board: &render::BoardInfo<'_>)
-where
-    I: display_interface::AsyncWriteOnlyDataCommand,
-{
-    render::splash(display, board);
-    let _ = display.flush().await;
 }

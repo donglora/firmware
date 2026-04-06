@@ -69,10 +69,13 @@ pub fn dashboard(
     match status.state {
         RadioState::Receiving => {
             // "RX" inverted on row 0
-            Rectangle::new(Point::new(0, 0), Size::new(MODE_BOX_W as u32, FONT_H as u32))
-                .into_styled(fill)
-                .draw(target)
-                .ok();
+            Rectangle::new(
+                Point::new(0, 0),
+                Size::new(MODE_BOX_W as u32, FONT_H as u32),
+            )
+            .into_styled(fill)
+            .draw(target)
+            .ok();
             Text::new("RX", Point::new(1, FONT_H - 1), inv_style)
                 .draw(target)
                 .ok();
@@ -217,10 +220,7 @@ pub fn dashboard(
 }
 
 /// Render the splash/waiting screen (shown when idle or no config).
-pub fn splash(
-    target: &mut impl DrawTarget<Color = BinaryColor>,
-    board: &BoardInfo,
-) {
+pub fn splash(target: &mut impl DrawTarget<Color = BinaryColor>, board: &BoardInfo) {
     let bb = target.bounding_box();
     let w = bb.size.width as i32;
 
@@ -324,11 +324,8 @@ fn rssi_sparkline(
             i + committed.saturating_sub(effective_bars)
         } else {
             let start = count - RSSI_HISTORY_LEN;
-            let skip = RSSI_HISTORY_LEN.saturating_sub(if live {
-                visible_bars - 1
-            } else {
-                visible_bars
-            });
+            let skip =
+                RSSI_HISTORY_LEN.saturating_sub(if live { visible_bars - 1 } else { visible_bars });
             (start + skip + i) % RSSI_HISTORY_LEN
         };
         let is_tx = tx_history[idx];
@@ -361,7 +358,11 @@ fn bar_height(rssi: i16, is_tx: bool, spark_h: i32) -> Option<i32> {
         let clamped = rssi.clamp(RSSI_MIN, RSSI_MAX);
         ((clamped - RSSI_MIN) as i32 * spark_h) / (RSSI_MAX - RSSI_MIN) as i32
     };
-    if h == 0 { None } else { Some(h) }
+    if h == 0 {
+        None
+    } else {
+        Some(h)
+    }
 }
 
 /// Draw a single sparkline bar (solid for RX, dotted for TX).
