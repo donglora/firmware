@@ -123,7 +123,7 @@ pub async fn display_task(
 
     cfg_if::cfg_if! {
         if #[cfg(feature = "wio_tracker_l1")] {
-            let mut display = super::sh1106::Sh1106::new(parts.i2c, 0x3D);
+            let mut display = crate::driver::sh1106::Sh1106::new(parts.i2c, 0x3D);
 
             Timer::after_millis(100).await;
 

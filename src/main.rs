@@ -21,6 +21,10 @@ mod board;
 mod channel;
 #[cfg(not(test))]
 mod display;
+#[cfg(not(test))]
+mod driver;
+#[cfg(not(test))]
+mod hal;
 mod protocol;
 #[cfg(not(test))]
 mod radio;

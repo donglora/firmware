@@ -2,6 +2,7 @@ use esp_hal::gpio::{Level, Output, OutputConfig};
 
 use super::esp32s3;
 use super::traits::LoRaBoard;
+use crate::hal::esp32s3 as mcu;
 
 #[allow(unused_imports)] // Re-exported for other modules (display, radio, usb tasks)
 pub use super::esp32s3::{DisplayI2c, DisplayParts, RadioDriver, RadioParts, UsbDriver, UsbParts};
@@ -22,7 +23,7 @@ impl LoRaBoard for Board {
     }
 
     fn mac_address() -> [u8; 6] {
-        esp_hal::efuse::Efuse::mac_address()
+        mcu::mac_address()
     }
 }
 
@@ -30,19 +31,20 @@ impl Board {
     pub fn into_parts(self) -> (RadioParts, UsbParts, Option<DisplayParts>) {
         let p = self.p;
 
-        esp32s3::start_timer(p.TIMG0);
+        mcu::start_timer(p.TIMG0);
 
         // Vext power: GPIO36, active LOW to enable peripherals
         let vext = Output::new(p.GPIO36, Level::Low, OutputConfig::default());
         core::mem::forget(vext); // hold pin low permanently; drop would reset it
 
-        let radio = esp32s3::init_radio(
-            p.SPI2, p.DMA_CH0, p.GPIO9, p.GPIO10, p.GPIO11, p.GPIO8, p.GPIO12, p.GPIO14, p.GPIO13,
-        );
+        let spi_bus = mcu::init_spi(p.SPI2, p.DMA_CH0, p.GPIO9, p.GPIO10, p.GPIO11);
+        let radio = esp32s3::init_radio(spi_bus, p.GPIO8, p.GPIO12, p.GPIO14, p.GPIO13);
 
         // Note: switches internal USB PHY from Serial-JTAG to OTG.
         // espflash --monitor will stop working after this point.
-        let usb = esp32s3::init_usb(p.USB0, p.GPIO20, p.GPIO19);
+        let usb = UsbParts {
+            driver: mcu::init_usb(p.USB0, p.GPIO20, p.GPIO19),
+        };
 
         // SSD1315 display reset: pulse GPIO21 low->high before I2C init
         let mut display_rst = Output::new(p.GPIO21, Level::Low, OutputConfig::default());
@@ -51,7 +53,7 @@ impl Board {
         esp_hal::delay::Delay::new().delay_millis(10);
         core::mem::forget(display_rst); // hold reset high permanently
 
-        let i2c = esp32s3::init_display_i2c(p.I2C0, p.GPIO17, p.GPIO18);
+        let i2c = mcu::init_i2c(p.I2C0, p.GPIO17, p.GPIO18);
         let mac = Self::mac_address();
         let display = Some(DisplayParts { i2c, mac });
 
