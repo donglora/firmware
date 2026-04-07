@@ -20,7 +20,22 @@ type RadioSpiDevice = SpiDevice<'static, NoopRawMutex, mcu::SpiBus, Nss>;
 pub type RadioDriver = Sx126x<RadioSpiDevice, Iv, Sx1262>;
 pub type UsbDriver = mcu::UsbNrfDriver;
 pub type DisplayI2c = mcu::I2cBus;
-pub type LedDriver = ();
+
+// ── LED driver (green LED on P1.01) ─────────────────────────────────
+
+pub struct SimpleLed(pub Output<'static>);
+
+impl super::traits::RgbLed for SimpleLed {
+    async fn set_rgb(&mut self, r: u8, g: u8, b: u8) {
+        if r > 0 || g > 0 || b > 0 {
+            self.0.set_high();
+        } else {
+            self.0.set_low();
+        }
+    }
+}
+
+pub type LedDriver = SimpleLed;
 
 pub type DisplayDriver = crate::driver::sh1106::Sh1106<DisplayI2c>;
 
@@ -67,7 +82,7 @@ impl LoRaBoard for Board {
     type CommParts = UsbParts;
     type DisplayParts = DisplayParts;
     type DisplayDriver = DisplayDriver;
-    type LedDriver = ();
+    type LedDriver = LedDriver;
 
     fn init() -> Self {
         let mut config = embassy_nrf::config::Config::default();
@@ -81,7 +96,7 @@ impl LoRaBoard for Board {
         mcu::mac_address()
     }
 
-    fn into_parts(self) -> BoardParts<RadioParts, UsbParts, DisplayParts, ()> {
+    fn into_parts(self) -> BoardParts<RadioParts, UsbParts, DisplayParts, LedDriver> {
         let p = self.p;
 
         // ── SPI bus for SX1262 ──────────────────────────────────
@@ -131,11 +146,15 @@ impl LoRaBoard for Board {
         );
         let display = Some(DisplayParts { i2c });
 
+        // Green LED on P1.01
+        let led_pin = Output::new(p.P1_01, Level::Low, OutputDrive::Standard);
+        let led = Some(SimpleLed(led_pin));
+
         BoardParts {
             radio,
             host,
             display,
-            led: None,
+            led,
             mac: Self::mac_address(),
         }
     }

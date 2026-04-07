@@ -18,6 +18,20 @@ use crate::hal::esp32s3 as mcu;
 
 pub use mcu::{I2cBus as DisplayI2c, SpiBus};
 
+// ── LED driver ──────────────────────────────────────────────────────
+
+pub struct SimpleLed(pub Output<'static>);
+
+impl super::traits::RgbLed for SimpleLed {
+    async fn set_rgb(&mut self, r: u8, g: u8, b: u8) {
+        if r > 0 || g > 0 || b > 0 {
+            self.0.set_high();
+        } else {
+            self.0.set_low();
+        }
+    }
+}
+
 // ── Concrete peripheral types ───────────────────────────────────────
 
 type Nss = Output<'static>;

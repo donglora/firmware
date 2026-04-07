@@ -3,7 +3,7 @@ use static_cell::StaticCell;
 
 use super::esp32s3;
 use super::traits::{BoardParts, LoRaBoard};
-use crate::driver::simple_led::SimpleLed;
+use super::esp32s3::SimpleLed;
 use crate::hal::esp32s3 as mcu;
 
 pub use super::esp32s3::{
@@ -77,7 +77,7 @@ impl LoRaBoard for Board {
 
         // Orange LED on GPIO35
         let led_pin = Output::new(p.GPIO35, Level::Low, OutputConfig::default());
-        let led = Some(SimpleLed::new(led_pin));
+        let led = Some(SimpleLed(led_pin));
 
         BoardParts {
             radio,
