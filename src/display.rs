@@ -76,6 +76,14 @@ impl DisplayState {
     }
 }
 
+/// Map SNR (dB) to LED brightness (4..64). Stronger signal = brighter.
+fn snr_brightness(snr: Option<i16>) -> u8 {
+    let snr = snr.unwrap_or(-10);
+    let clamped = snr.clamp(-20, 15) as i32;
+    // -20 → 4, +15 → 64
+    ((clamped + 20) * 60 / 35 + 4) as u8
+}
+
 /// Render the appropriate screen for the current state into the display buffer.
 fn render_current(
     display: &mut impl DrawTarget<Color = BinaryColor>,
@@ -160,18 +168,24 @@ pub async fn display_task(
                 if tx_packet {
                     state.record_tx();
                 }
+                let last_snr = radio_status.last_snr;
                 state.last_status = radio_status;
 
                 if state.display_on {
                     render_current(&mut display, &state, &board_info);
                     let _ = display.flush().await;
 
-                    // Blink LED: green on RX, red on TX
+                    // Brief LED blink: red on TX, green scaled by SNR on RX
                     if let Some(ref mut led) = led {
                         if tx_packet {
                             led.set_rgb(32, 0, 0).await;
+                            Timer::after_millis(50).await;
+                            led.set_rgb(0, 0, 0).await;
                         } else if rx_packet {
-                            led.set_rgb(0, 32, 0).await;
+                            let b = snr_brightness(last_snr);
+                            led.set_rgb(0, b, 0).await;
+                            Timer::after_millis(50).await;
+                            led.set_rgb(0, 0, 0).await;
                         }
                     }
                 }
@@ -205,11 +219,8 @@ pub async fn display_task(
                 }
             },
             Either3::Third(()) => {
-                // Timer tick: advance sparkline slot, turn off LED blink
+                // Timer tick: advance sparkline slot
                 state.advance_slot();
-                if let Some(ref mut led) = led {
-                    led.set_rgb(0, 0, 0).await;
-                }
                 if state.display_on && state.is_active() {
                     render_current(&mut display, &state, &board_info);
                     let _ = display.flush().await;
