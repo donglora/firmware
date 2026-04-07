@@ -77,18 +77,10 @@ impl LoRaBoard for Board {
         let i2c = mcu::init_i2c(p.I2C0, p.GPIO17, p.GPIO18);
         let display = Some(DisplayParts { i2c });
 
-        // WS2812B RGB LED on GPIO38 via RMT channel 0.
-        // Wrap in ManuallyDrop so the Rmt peripheral isn't disabled when
-        // the struct is dropped after we take channel0.
-        let rmt = core::mem::ManuallyDrop::new(
-            Rmt::new(p.RMT, Rate::from_mhz(80))
-                .expect("RMT init")
-                .into_async(),
-        );
-        // SAFETY: we're reading channel0 out of the ManuallyDrop wrapper.
-        // The Rmt won't be dropped, so the peripheral stays enabled.
-        let channel0 = unsafe { core::ptr::read(&raw const rmt.channel0) };
-        let led_channel = channel0
+        // WS2812B RGB LED on GPIO38 via RMT channel 0 (blocking, ~31µs per update)
+        let rmt = Rmt::new(p.RMT, Rate::from_mhz(80)).expect("RMT init");
+        let led_channel = rmt
+            .channel0
             .configure_tx(
                 p.GPIO38,
                 TxChannelConfig::default()

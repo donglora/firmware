@@ -2,6 +2,7 @@
 //!
 //! Encodes RGB values as GRB PulseCodes and transmits via RMT.
 //! At 80 MHz with divider=1, each tick is 12.5 ns.
+//! Uses blocking transmit (~31µs per LED update).
 
 use esp_hal::gpio::Level;
 use esp_hal::rmt::{Channel, PulseCode, Tx};
@@ -14,14 +15,16 @@ const BIT_0: PulseCode = PulseCode::new(Level::High, 32, Level::Low, 68);
 /// WS2812 1-bit: High 800ns (64 ticks), Low 450ns (36 ticks).
 const BIT_1: PulseCode = PulseCode::new(Level::High, 64, Level::Low, 36);
 
-/// WS2812B single-LED driver over RMT.
+/// WS2812B single-LED driver over RMT (blocking).
 pub struct Ws2812 {
-    channel: Channel<'static, esp_hal::Async, Tx>,
+    channel: Option<Channel<'static, esp_hal::Blocking, Tx>>,
 }
 
 impl Ws2812 {
-    pub fn new(channel: Channel<'static, esp_hal::Async, Tx>) -> Self {
-        Self { channel }
+    pub fn new(channel: Channel<'static, esp_hal::Blocking, Tx>) -> Self {
+        Self {
+            channel: Some(channel),
+        }
     }
 
     /// Encode 3 bytes (GRB order) + end marker into PulseCodes.
@@ -35,7 +38,6 @@ impl Ws2812 {
                 idx += 1;
             }
         }
-        // data[24] is already end_marker
         data
     }
 }
@@ -43,8 +45,20 @@ impl Ws2812 {
 impl RgbLed for Ws2812 {
     async fn set_rgb(&mut self, r: u8, g: u8, b: u8) {
         let data = Self::encode(r, g, b);
-        if let Err(e) = self.channel.transmit(&data).await {
-            defmt::warn!("WS2812 transmit error: {}", e);
+        if let Some(ch) = self.channel.take() {
+            match ch.transmit(&data) {
+                Ok(tx) => match tx.wait() {
+                    Ok(ch) => self.channel = Some(ch),
+                    Err((e, ch)) => {
+                        defmt::warn!("WS2812 wait error: {}", e);
+                        self.channel = Some(ch);
+                    }
+                },
+                Err(e) => {
+                    defmt::warn!("WS2812 transmit error: {}", e);
+                    // Channel consumed on transmit error — LED is lost
+                }
+            }
         }
     }
 }
