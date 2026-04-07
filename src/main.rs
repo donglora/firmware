@@ -24,7 +24,7 @@ mod display;
 mod protocol;
 #[cfg(not(test))]
 mod radio;
-#[cfg(all(not(test), feature = "heltec_v3"))]
+#[cfg(not(test))]
 mod protocol_io;
 #[cfg(all(not(test), feature = "heltec_v3"))]
 mod uart;

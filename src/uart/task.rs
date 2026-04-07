@@ -9,7 +9,7 @@ use embassy_executor::task;
 use embedded_io_async::Write;
 
 use crate::channel::{CommandChannel, DisplayCommandChannel, ResponseChannel};
-use crate::protocol_io::{self, FrameAccumulator, MAX_FRAME};
+use crate::protocol_io::{self, CobsDecoder, MAX_FRAME};
 
 #[task]
 pub async fn uart_task(
@@ -25,7 +25,7 @@ pub async fn uart_task(
     let mut read_buf = [0u8; 64];
     let mut write_buf = [0u8; MAX_FRAME];
     let mut cobs_encode_buf = [0u8; MAX_FRAME];
-    let mut accumulator = FrameAccumulator::new();
+    let mut decoder = CobsDecoder::new();
 
     loop {
         use embassy_futures::select::select;
@@ -42,14 +42,14 @@ pub async fn uart_task(
                     Ok(0) => continue,
                     Ok(n) => n,
                     Err(_) => {
-                        accumulator.reset();
+                        decoder.reset();
                         embassy_time::Timer::after_millis(100).await;
                         continue;
                     }
                 };
 
                 let mut cmds = heapless::Vec::<_, 4>::new();
-                accumulator.feed(&read_buf[..n], |cmd| {
+                decoder.feed(&read_buf[..n], |cmd| {
                     let _ = cmds.push(cmd);
                 });
                 for cmd in cmds {
@@ -61,7 +61,7 @@ pub async fn uart_task(
             }
             Either::Second(response) => {
                 if let Some(frame) =
-                    protocol_io::encode_response(response, &mut write_buf, &mut cobs_encode_buf)
+                    protocol_io::cobs_encode_response(response, &mut write_buf, &mut cobs_encode_buf)
                 {
                     if tx.write_all(frame).await.is_err() {
                         warn!("UART write failed, response dropped");

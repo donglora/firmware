@@ -11,17 +11,9 @@ use embassy_usb::Builder;
 use static_cell::StaticCell;
 
 use crate::channel::{CommandChannel, DisplayCommand, DisplayCommandChannel, ResponseChannel};
-use crate::protocol::{Command, ErrorCode, Response};
+use crate::protocol_io::{self, CobsDecoder, MAX_FRAME};
 
-const MAX_FRAME: usize = 512;
 const MAX_PACKET: usize = 64;
-
-// Worst case: tag(1) + rssi(2) + snr(2) + len(2) + payload(256) = 263 bytes.
-// COBS adds ceil(263/254)+1 = 3 bytes. 266 < 512. Plenty of room.
-const _: () = assert!(
-    MAX_FRAME >= crate::protocol::MAX_PAYLOAD + 64,
-    "MAX_FRAME too small for max payload + COBS overhead"
-);
 
 #[task]
 pub async fn usb_task(
@@ -103,11 +95,7 @@ async fn protocol_loop<'d, D: embassy_usb_driver::Driver<'d>>(
     let mut read_buf = [0u8; MAX_PACKET];
     let mut write_buf = [0u8; MAX_FRAME];
     let mut cobs_encode_buf = [0u8; MAX_FRAME];
-
-    // COBS accumulator: collect bytes until 0x00 sentinel
-    let mut frame_buf = [0u8; MAX_FRAME];
-    let mut frame_len: usize = 0;
-
+    let mut decoder = CobsDecoder::new();
     let mut was_connected = false;
 
     loop {
@@ -123,61 +111,33 @@ async fn protocol_loop<'d, D: embassy_usb_driver::Driver<'d>>(
                     Ok(0) => continue,
                     Ok(n) => n,
                     Err(_) => {
-                        frame_len = 0; // reset accumulator
+                        decoder.reset();
                         embassy_time::Timer::after_millis(100).await;
                         continue;
                     }
                 };
 
-                // Feed bytes into the COBS accumulator
-                for &byte in &read_buf[..n] {
-                    if byte == 0x00 {
-                        // End of COBS frame — decode and parse
-                        if frame_len > 0 {
-                            let mut decode_buf = [0u8; MAX_FRAME];
-                            if let Some(decoded_len) =
-                                ucobs::decode(&frame_buf[..frame_len], &mut decode_buf)
-                            {
-                                if let Some(cmd) = Command::from_bytes(&decode_buf[..decoded_len]) {
-                                    route_command(
-                                        cmd,
-                                        commands,
-                                        responses,
-                                        display_commands,
-                                        has_display,
-                                        mac,
-                                    )
-                                    .await;
-                                }
-                            }
-                        }
-                        frame_len = 0;
-                    } else if frame_len < MAX_FRAME {
-                        frame_buf[frame_len] = byte;
-                        frame_len += 1;
-                    } else {
-                        // Frame too large — discard
-                        frame_len = 0;
-                    }
+                let mut cmds = heapless::Vec::<_, 4>::new();
+                decoder.feed(&read_buf[..n], |cmd| {
+                    let _ = cmds.push(cmd);
+                });
+                for cmd in cmds {
+                    protocol_io::route_command(
+                        cmd, commands, responses, display_commands, has_display, mac,
+                    )
+                    .await;
                 }
             }
             Either3::Second(response) => {
-                // Serialize response to fixed-size LE bytes, then COBS encode
-                let raw_len = response.write_to(&mut write_buf);
-                let encoded_len =
-                    ucobs::encode(&write_buf[..raw_len], &mut cobs_encode_buf).unwrap_or(0);
-                // Append 0x00 sentinel
-                if encoded_len < cobs_encode_buf.len() {
-                    cobs_encode_buf[encoded_len] = 0x00;
-                    let frame = &cobs_encode_buf[..encoded_len + 1];
+                if let Some(frame) =
+                    protocol_io::cobs_encode_response(response, &mut write_buf, &mut cobs_encode_buf)
+                {
                     for chunk in frame.chunks(MAX_PACKET) {
                         if sender.write_packet(chunk).await.is_err() {
                             warn!("USB write failed, response dropped");
                             break;
                         }
                     }
-                } else {
-                    warn!("COBS encode buffer overflow");
                 }
             }
             Either3::Third(()) => {
@@ -194,45 +154,5 @@ async fn protocol_loop<'d, D: embassy_usb_driver::Driver<'d>>(
             display_commands.send(DisplayCommand::On).await;
         }
         was_connected = connected;
-    }
-}
-
-/// Route a parsed command to the appropriate handler.
-///
-/// Display and MAC commands are handled locally (response sent immediately).
-/// All other commands are forwarded to the radio task (response sent later).
-/// Both paths feed the same `ResponseChannel`, so the one-outstanding-command
-/// rule in PROTOCOL.md is required to keep solicited responses ordered.
-async fn route_command(
-    cmd: Command,
-    commands: &CommandChannel,
-    responses: &ResponseChannel,
-    display_commands: &DisplayCommandChannel,
-    has_display: bool,
-    mac: [u8; 6],
-) {
-    match cmd {
-        Command::DisplayOn => {
-            if has_display {
-                display_commands.send(DisplayCommand::On).await;
-                responses.send(Response::Ok).await;
-            } else {
-                responses.send(Response::Error(ErrorCode::NoDisplay)).await;
-            }
-        }
-        Command::DisplayOff => {
-            if has_display {
-                display_commands.send(DisplayCommand::Off).await;
-                responses.send(Response::Ok).await;
-            } else {
-                responses.send(Response::Error(ErrorCode::NoDisplay)).await;
-            }
-        }
-        Command::GetMac => {
-            responses.send(Response::MacAddress(mac)).await;
-        }
-        other => {
-            commands.send(other).await;
-        }
     }
 }

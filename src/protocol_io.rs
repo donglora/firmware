@@ -18,13 +18,13 @@ const _: () = assert!(
     "MAX_FRAME too small for max payload + COBS overhead"
 );
 
-/// Accumulates bytes into complete COBS frames.
-pub struct FrameAccumulator {
+/// Decodes COBS-framed commands from a byte stream.
+pub struct CobsDecoder {
     buf: [u8; MAX_FRAME],
     len: usize,
 }
 
-impl FrameAccumulator {
+impl CobsDecoder {
     pub const fn new() -> Self {
         Self {
             buf: [0u8; MAX_FRAME],
@@ -67,7 +67,7 @@ impl FrameAccumulator {
 /// COBS-encode a response into `encode_buf` with trailing 0x00 sentinel.
 ///
 /// Returns the slice to send (encoded frame + sentinel), or `None` on overflow.
-pub fn encode_response<'a>(
+pub fn cobs_encode_response<'a>(
     response: Response,
     write_buf: &mut [u8; MAX_FRAME],
     encode_buf: &'a mut [u8; MAX_FRAME],
