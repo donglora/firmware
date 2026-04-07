@@ -25,15 +25,11 @@ mod display;
 mod driver;
 #[cfg(not(test))]
 mod hal;
+#[cfg(not(test))]
+mod host;
 mod protocol;
 #[cfg(not(test))]
 mod radio;
-#[cfg(not(test))]
-mod protocol_io;
-#[cfg(all(not(test), feature = "heltec_v3"))]
-mod uart;
-#[cfg(all(not(test), not(feature = "heltec_v3")))]
-mod usb;
 
 #[cfg(not(test))]
 use embassy_executor::Spawner;
@@ -90,31 +86,16 @@ async fn run(spawner: Spawner) {
         .spawn(radio::radio_task(radio, &COMMANDS, &RESPONSES, &STATUS))
         .expect("spawn radio_task");
 
-    cfg_if::cfg_if! {
-        if #[cfg(feature = "heltec_v3")] {
-            spawner
-                .spawn(uart::uart_task(
-                    comm,
-                    &COMMANDS,
-                    &RESPONSES,
-                    &DISPLAY_COMMANDS,
-                    has_display,
-                    mac,
-                ))
-                .expect("spawn uart_task");
-        } else {
-            spawner
-                .spawn(usb::usb_task(
-                    comm,
-                    &COMMANDS,
-                    &RESPONSES,
-                    &DISPLAY_COMMANDS,
-                    has_display,
-                    mac,
-                ))
-                .expect("spawn usb_task");
-        }
-    }
+    spawner
+        .spawn(host::host_task(
+            comm,
+            &COMMANDS,
+            &RESPONSES,
+            &DISPLAY_COMMANDS,
+            has_display,
+            mac,
+        ))
+        .expect("spawn host_task");
 
     if let Some(dp) = display {
         spawner

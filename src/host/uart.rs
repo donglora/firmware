@@ -1,18 +1,16 @@
-//! UART task: COBS-framed fixed-size LE command/response protocol.
+//! UART host task: COBS-framed fixed-size LE command/response protocol.
 //!
-//! Reads COBS frames from UART, decodes them, parses commands, routes them
-//! to the radio or display task, and sends COBS-framed responses back.
-//! Used for boards with USB-UART bridge chips (e.g. CP2102 on some Heltec V3).
+//! Used for boards with USB-UART bridge chips (e.g. CP2102 on Heltec V3).
 
 use defmt::warn;
 use embassy_executor::task;
 use embedded_io_async::Write;
 
 use crate::channel::{CommandChannel, DisplayCommandChannel, ResponseChannel};
-use crate::protocol_io::{self, CobsDecoder, MAX_FRAME};
+use super::framing::{self, CobsDecoder, MAX_FRAME};
 
 #[task]
-pub async fn uart_task(
+pub async fn host_task(
     parts: crate::board::UartParts,
     commands: &'static CommandChannel,
     responses: &'static ResponseChannel,
@@ -28,8 +26,7 @@ pub async fn uart_task(
     let mut decoder = CobsDecoder::new();
 
     loop {
-        use embassy_futures::select::select;
-        use embassy_futures::select::Either;
+        use embassy_futures::select::{select, Either};
 
         match select(
             embedded_io_async::Read::read(&mut rx, &mut read_buf),
@@ -53,7 +50,7 @@ pub async fn uart_task(
                     let _ = cmds.push(cmd);
                 });
                 for cmd in cmds {
-                    protocol_io::route_command(
+                    framing::route_command(
                         cmd, commands, responses, display_commands, has_display, mac,
                     )
                     .await;
@@ -61,7 +58,7 @@ pub async fn uart_task(
             }
             Either::Second(response) => {
                 if let Some(frame) =
-                    protocol_io::cobs_encode_response(response, &mut write_buf, &mut cobs_encode_buf)
+                    framing::cobs_encode_response(response, &mut write_buf, &mut cobs_encode_buf)
                 {
                     if tx.write_all(frame).await.is_err() {
                         warn!("UART write failed, response dropped");
