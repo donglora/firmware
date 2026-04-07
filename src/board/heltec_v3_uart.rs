@@ -1,10 +1,10 @@
-//! Heltec WiFi LoRa 32 V3 — native USB (requires hardware mod).
+//! Heltec WiFi LoRa 32 V3 — stock UART (via CP2102 bridge).
 //!
-//! Stock V3 boards route USB through a CP2102 bridge to UART. To use native
-//! USB CDC-ACM, solder R29 (D+) and R3 (D-) on the PCB and disconnect the
-//! CP2102 from the USB data lines. See the project README for details.
+//! This is for unmodified V3 boards where USB goes through the CP2102
+//! bridge to UART0. The board appears as /dev/ttyUSB* (not ttyACM*).
 //!
-//! For stock (unmodified) V3 boards, use the `heltec_v3_uart` feature instead.
+//! If you've done the hardware mod (solder R29/R3, disconnect CP2102),
+//! use the `heltec_v3` feature instead for native USB CDC-ACM support.
 
 use esp_hal::gpio::{Level, Output, OutputConfig};
 
@@ -14,8 +14,8 @@ use crate::hal::esp32s3 as mcu;
 
 #[allow(unused_imports)] // Re-exported for other modules (display, radio, host tasks)
 pub use super::esp32s3::{
-    create_display, DisplayDriver, DisplayI2c, DisplayParts, RadioDriver, RadioParts, UsbDriver,
-    UsbParts,
+    create_display, DisplayDriver, DisplayI2c, DisplayParts, RadioDriver, RadioParts, UartDriver,
+    UartParts,
 };
 
 pub struct Board {
@@ -23,11 +23,11 @@ pub struct Board {
 }
 
 impl LoRaBoard for Board {
-    const NAME: &'static str = "Heltec V3";
+    const NAME: &'static str = "Heltec V3 (UART)";
     const TX_POWER_RANGE: (i8, i8) = (-9, 22);
 
     type RadioParts = RadioParts;
-    type CommParts = UsbParts;
+    type CommParts = UartParts;
     type DisplayParts = DisplayParts;
     type DisplayDriver = DisplayDriver;
 
@@ -40,7 +40,7 @@ impl LoRaBoard for Board {
         mcu::mac_address()
     }
 
-    fn into_parts(self) -> BoardParts<RadioParts, UsbParts, DisplayParts> {
+    fn into_parts(self) -> BoardParts<RadioParts, UartParts, DisplayParts> {
         let p = self.p;
 
         mcu::start_timer(p.TIMG0);
@@ -51,11 +51,8 @@ impl LoRaBoard for Board {
 
         let spi_bus = mcu::init_spi(p.SPI2, p.DMA_CH0, p.GPIO9, p.GPIO10, p.GPIO11);
         let radio = esp32s3::init_radio(spi_bus, p.GPIO8, p.GPIO12, p.GPIO14, p.GPIO13);
-
-        // Note: switches internal USB PHY from Serial-JTAG to OTG.
-        // espflash --monitor will stop working after this point.
-        let host = UsbParts {
-            driver: mcu::init_usb(p.USB0, p.GPIO20, p.GPIO19),
+        let host = UartParts {
+            driver: mcu::init_uart(p.UART0, p.GPIO43, p.GPIO44),
         };
 
         // SSD1306 display reset: pulse GPIO21 low->high before I2C init

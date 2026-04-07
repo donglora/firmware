@@ -32,12 +32,12 @@ pub struct RadioParts {
     pub delay: Delay,
 }
 
-#[cfg(not(feature = "heltec_v3"))]
+#[allow(dead_code)] // Not used by heltec_v3_uart
 pub struct UsbParts {
     pub driver: UsbDriver,
 }
 
-#[cfg(feature = "heltec_v3")]
+#[allow(dead_code)] // Only used by heltec_v3_uart
 pub struct UartParts {
     pub driver: UartDriver,
 }

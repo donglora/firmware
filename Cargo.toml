@@ -84,6 +84,12 @@ heltec_v3 = [
   "dep:esp-println",
   "dep:esp-rtos",
 ]
+heltec_v3_uart = [
+  "dep:esp-backtrace",
+  "dep:esp-hal",
+  "dep:esp-println",
+  "dep:esp-rtos",
+]
 heltec_v4 = [
   "dep:esp-backtrace",
   "dep:esp-hal",

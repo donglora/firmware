@@ -6,7 +6,7 @@
 pub mod framing;
 
 cfg_if::cfg_if! {
-    if #[cfg(feature = "heltec_v3")] {
+    if #[cfg(feature = "heltec_v3_uart")] {
         mod uart;
         pub use uart::host_task;
     } else {

@@ -3,8 +3,9 @@ set shell := ["bash", "-c"]
 # Board definitions: feature target chip
 # Xtensa targets use nightly cargo + esp rustc + -Zbuild-std=core.
 # Tool versions are pinned in mise.toml; run `just setup` to install everything.
-heltec_v3 := "heltec_v3 xtensa-esp32s3-none-elf esp32s3"
-heltec_v4 := "heltec_v4 xtensa-esp32s3-none-elf esp32s3"
+heltec_v3      := "heltec_v3 xtensa-esp32s3-none-elf esp32s3"
+heltec_v3_uart := "heltec_v3_uart xtensa-esp32s3-none-elf esp32s3"
+heltec_v4      := "heltec_v4 xtensa-esp32s3-none-elf esp32s3"
 rak_wisblock_4631  := "rak_wisblock_4631 thumbv7em-none-eabihf nRF52840_xxAA"
 wio_tracker_l1     := "wio_tracker_l1 thumbv7em-none-eabihf nRF52840_xxAA"
 
@@ -12,7 +13,7 @@ builds_dir := "builds"
 version := `sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml`
 
 # All known boards
-boards := "heltec_v3 heltec_v4 rak_wisblock_4631 wio_tracker_l1"
+boards := "heltec_v3 heltec_v3_uart heltec_v4 rak_wisblock_4631 wio_tracker_l1"
 
 # Install all required tools and toolchains
 setup:
@@ -203,6 +204,7 @@ _flash_uf2 board:
 [private]
 _info name:
     @if [ "{{name}}" == "heltec_v3" ]; then echo "{{heltec_v3}}"; \
+     elif [ "{{name}}" == "heltec_v3_uart" ]; then echo "{{heltec_v3_uart}}"; \
      elif [ "{{name}}" == "heltec_v4" ]; then echo "{{heltec_v4}}"; \
      elif [ "{{name}}" == "rak_wisblock_4631" ]; then echo "{{rak_wisblock_4631}}"; \
      elif [ "{{name}}" == "wio_tracker_l1" ]; then echo "{{wio_tracker_l1}}"; \
