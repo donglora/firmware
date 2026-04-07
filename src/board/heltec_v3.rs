@@ -7,13 +7,11 @@
 //! For stock (unmodified) V3 boards, use the `heltec_v3_uart` feature instead.
 
 use esp_hal::gpio::{Level, Output, OutputConfig};
-use esp_hal::rmt::{Rmt, TxChannelConfig, TxChannelCreator};
-use esp_hal::time::Rate;
 use static_cell::StaticCell;
 
 use super::esp32s3;
 use super::traits::{BoardParts, LoRaBoard};
-use crate::driver::ws2812::Ws2812;
+use crate::driver::simple_led::SimpleLed;
 use crate::hal::esp32s3 as mcu;
 
 pub use super::esp32s3::{
@@ -21,7 +19,7 @@ pub use super::esp32s3::{
 };
 
 pub type UsbDriver = esp_hal::otg_fs::asynch::Driver<'static>;
-pub type LedDriver = Ws2812;
+pub type LedDriver = SimpleLed;
 
 pub struct UsbParts {
     pub driver: UsbDriver,
@@ -39,7 +37,7 @@ impl LoRaBoard for Board {
     type CommParts = UsbParts;
     type DisplayParts = DisplayParts;
     type DisplayDriver = DisplayDriver;
-    type LedDriver = Ws2812;
+    type LedDriver = LedDriver;
 
     fn init() -> Self {
         let p = esp_hal::init(esp_hal::Config::default());
@@ -50,7 +48,7 @@ impl LoRaBoard for Board {
         mcu::mac_address()
     }
 
-    fn into_parts(self) -> BoardParts<RadioParts, UsbParts, DisplayParts, Ws2812> {
+    fn into_parts(self) -> BoardParts<RadioParts, UsbParts, DisplayParts, LedDriver> {
         let p = self.p;
 
         mcu::start_timer(p.TIMG0);
@@ -84,14 +82,9 @@ impl LoRaBoard for Board {
         let i2c = mcu::init_i2c(p.I2C0, p.GPIO17, p.GPIO18);
         let display = Some(DisplayParts { i2c });
 
-        // WS2812B RGB LED on GPIO38 via RMT channel 0
-        let rmt = Rmt::new(p.RMT, Rate::from_mhz(80))
-            .expect("RMT init")
-            .into_async();
-        let led_channel = rmt.channel0
-            .configure_tx(p.GPIO38, TxChannelConfig::default().with_clk_divider(1).with_idle_output(true))
-            .expect("RMT TX channel init");
-        let led = Some(Ws2812::new(led_channel));
+        // White LED on GPIO35
+        let led_pin = Output::new(p.GPIO35, Level::Low, OutputConfig::default());
+        let led = Some(SimpleLed::new(led_pin));
 
         BoardParts {
             radio,
