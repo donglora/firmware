@@ -34,6 +34,7 @@ pub struct BoardInfo<'a> {
 }
 
 /// Render the active dashboard (shown when radio is in RX or TX mode).
+#[allow(clippy::too_many_arguments)]
 pub fn dashboard(
     target: &mut impl DrawTarget<Color = BinaryColor>,
     status: &RadioStatus,
@@ -289,6 +290,7 @@ fn compact_count(n: u32) -> String<10> {
 ///
 /// The current (uncommitted) slot is rendered at the rightmost position
 /// so that incoming packets appear on the graph immediately.
+#[allow(clippy::too_many_arguments)]
 fn rssi_sparkline(
     target: &mut impl DrawTarget<Color = BinaryColor>,
     history: &[i16; RSSI_HISTORY_LEN],

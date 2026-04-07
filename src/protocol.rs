@@ -328,6 +328,8 @@ mod tests {
                 cr: 8,
                 sync_word: 0x1234,
                 tx_power_dbm: -9,
+                preamble_len: 16,
+                cad: 1,
             };
             let mut buf = [0u8; RADIO_CONFIG_SIZE];
             cfg.write_to(&mut buf);

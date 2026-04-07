@@ -116,3 +116,5 @@ undocumented_unsafe_blocks = "deny"
 codegen-units = 1
 lto = "fat"
 opt-level = 3  # "s"/"z" break Xtensa (l32r literal range exceeded)
+panic = "abort"
+strip = true

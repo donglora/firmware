@@ -74,7 +74,7 @@ impl<I: I2c> Sh1106<I> {
             // Set page address and column start (with SH1106 2-column offset).
             self.cmd(&[
                 0xB0 | page as u8,          // page address
-                0x00 | (COL_OFFSET & 0x0F), // column low nibble
+                COL_OFFSET & 0x0F, // column low nibble
                 0x10 | (COL_OFFSET >> 4),   // column high nibble
             ])
             .await?;
@@ -91,10 +91,6 @@ impl<I: I2c> Sh1106<I> {
         self.cmd(&[0x81, value]).await
     }
 
-    /// Clear the framebuffer (call flush() to update the display).
-    pub fn clear_buffer(&mut self) {
-        self.buffer.fill(0);
-    }
 }
 
 impl<I: I2c> DrawTarget for Sh1106<I> {
