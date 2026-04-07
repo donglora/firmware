@@ -108,7 +108,7 @@ pub async fn display_task(
 ) {
     // Format MAC address as "XX:XX:XX:XX:XX:XX"
     let mut mac_str: heapless::String<18> = heapless::String::new();
-    let m = parts.mac;
+    let m = Board::mac_address();
     let _ = core::fmt::Write::write_fmt(
         &mut mac_str,
         format_args!(

@@ -9,7 +9,7 @@ use embassy_time::Delay;
 use lora_phy::iv::GenericSx126xInterfaceVariant;
 use lora_phy::sx126x::{self, Sx1262, Sx126x};
 
-use super::traits::LoRaBoard;
+use super::traits::{BoardParts, LoRaBoard};
 use crate::hal::nrf52840 as mcu;
 
 // ── Concrete peripheral types ───────────────────────────────────────
@@ -22,18 +22,6 @@ pub type UsbDriver = mcu::UsbNrfDriver;
 pub type DisplayI2c = mcu::I2cBus;
 
 pub type DisplayDriver = crate::driver::sh1106::Sh1106<DisplayI2c>;
-
-pub async fn create_display(i2c: DisplayI2c) -> Option<DisplayDriver> {
-    let mut display = crate::driver::sh1106::Sh1106::new(i2c, 0x3D);
-
-    embassy_time::Timer::after_millis(100).await;
-    if display.init().await.is_err() {
-        defmt::error!("SH1106 display init failed");
-        return None;
-    }
-    let _ = display.set_brightness(0xFF).await;
-    Some(display)
-}
 
 // ── Peripheral bundles ──────────────────────────────────────────────
 
@@ -48,7 +36,20 @@ pub struct UsbParts {
 
 pub struct DisplayParts {
     pub i2c: DisplayI2c,
-    pub mac: [u8; 6],
+}
+
+// ── Display init ────────────────────────────────────────────────────
+
+pub async fn create_display(i2c: DisplayI2c) -> Option<DisplayDriver> {
+    let mut display = crate::driver::sh1106::Sh1106::new(i2c, 0x3D);
+
+    embassy_time::Timer::after_millis(100).await;
+    if display.init().await.is_err() {
+        defmt::error!("SH1106 display init failed");
+        return None;
+    }
+    let _ = display.set_brightness(0xFF).await;
+    Some(display)
 }
 
 // ── Board init ──────────────────────────────────────────────────────
@@ -61,6 +62,11 @@ impl LoRaBoard for Board {
     const NAME: &'static str = "Wio Tracker L1";
     const TX_POWER_RANGE: (i8, i8) = (-9, 22);
 
+    type RadioParts = RadioParts;
+    type CommParts = UsbParts;
+    type DisplayParts = DisplayParts;
+    type DisplayDriver = DisplayDriver;
+
     fn init() -> Self {
         let mut config = embassy_nrf::config::Config::default();
         config.hfclk_source = embassy_nrf::config::HfclkSource::ExternalXtal;
@@ -72,10 +78,8 @@ impl LoRaBoard for Board {
     fn mac_address() -> [u8; 6] {
         mcu::mac_address()
     }
-}
 
-impl Board {
-    pub fn into_parts(self) -> (RadioParts, UsbParts, Option<DisplayParts>) {
+    fn into_parts(self) -> BoardParts<RadioParts, UsbParts, DisplayParts> {
         let p = self.p;
 
         // ── SPI bus for SX1262 ──────────────────────────────────
@@ -87,7 +91,6 @@ impl Board {
         let nss = Output::new(p.P1_14, Level::High, OutputDrive::Standard);
         let spi_device = SpiDevice::new(spi_bus, nss);
 
-        // ── SX1262 control pins ─────────────────────────────────
         let reset = Output::new(p.P1_07, Level::High, OutputDrive::Standard);
         let dio1 = Input::new(p.P0_07, Pull::Down);
         let busy = Input::new(p.P1_10, Pull::Down);
@@ -111,7 +114,7 @@ impl Board {
 
         // ── USB ─────────────────────────────────────────────────
         let vbus = mcu::alloc_vbus_detect(true, true);
-        let usb = UsbParts {
+        let host = UsbParts {
             driver: Driver::new(p.USBD, mcu::Irqs, vbus),
         };
 
@@ -124,9 +127,13 @@ impl Board {
         let i2c = embassy_nrf::twim::Twim::new(
             p.TWISPI0, mcu::Irqs, p.P0_06, p.P0_05, twim::Config::default(), twim_buf,
         );
-        let mac = Self::mac_address();
-        let display = Some(DisplayParts { i2c, mac });
+        let display = Some(DisplayParts { i2c });
 
-        (radio, usb, display)
+        BoardParts {
+            radio,
+            host,
+            display,
+            mac: Self::mac_address(),
+        }
     }
 }

@@ -44,7 +44,6 @@ pub struct UartParts {
 
 pub struct DisplayParts {
     pub i2c: DisplayI2c,
-    pub mac: [u8; 6],
 }
 
 // ── Display driver ──────────────────────────────────────────────────

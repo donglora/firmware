@@ -1,31 +1,48 @@
 //! Board abstraction trait.
 //!
-//! Every board must implement [`LoRaBoard`]. The compiler enforces completeness —
-//! missing constants or methods are compile errors, not runtime surprises.
-//!
-//! Board modules also export concrete types (`RadioParts`, `UsbParts`,
-//! `DisplayParts`, `RadioDriver`, `UsbDriver`, `DisplayI2c`) that the tasks
-//! use directly. The trait verifies metadata and initialization; the types
-//! verify hardware compatibility.
+//! Every board must implement [`LoRaBoard`] with concrete associated types
+//! for its radio, host communication, and display peripherals. The compiler
+//! enforces completeness — missing types or methods are compile errors.
 //!
 //! See `src/board/PORTING.md` for a step-by-step guide to adding a new board.
 
+use embedded_graphics::draw_target::DrawTarget;
+use embedded_graphics::pixelcolor::BinaryColor;
+
 /// Compile-time contract for a DongLoRa board.
-///
-/// Every board's `Board` struct must implement this trait. It verifies that
-/// the board provides all required metadata and initialization methods.
-/// The tasks use the board's concrete types directly (not the trait's
-/// associated types) because Embassy tasks must be concrete.
-pub trait LoRaBoard {
+pub trait LoRaBoard: Sized {
     /// Human-readable board name (shown on display splash screen).
     const NAME: &'static str;
 
     /// TX power range in dBm (min, max) for this board's radio + PA.
     const TX_POWER_RANGE: (i8, i8);
 
+    /// Radio peripheral bundle (driver + delay).
+    type RadioParts;
+
+    /// Host communication peripheral bundle (USB or UART driver).
+    type CommParts;
+
+    /// Display peripheral bundle (I2C bus for display init).
+    type DisplayParts;
+
+    /// Concrete display driver type (must implement DrawTarget for rendering).
+    type DisplayDriver: DrawTarget<Color = BinaryColor>;
+
     /// Initialize the board hardware.
     fn init() -> Self;
 
     /// Read the board's unique hardware address (MAC, device ID, etc.).
     fn mac_address() -> [u8; 6];
+
+    /// Decompose initialized board into peripheral bundles for each task.
+    fn into_parts(self) -> BoardParts<Self::RadioParts, Self::CommParts, Self::DisplayParts>;
+}
+
+/// Peripheral bundles for each firmware task, produced by [`LoRaBoard::into_parts`].
+pub struct BoardParts<R, C, D> {
+    pub radio: R,
+    pub host: C,
+    pub display: Option<D>,
+    pub mac: [u8; 6],
 }

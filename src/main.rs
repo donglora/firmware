@@ -77,27 +77,24 @@ cfg_if::cfg_if! {
 #[cfg(not(test))]
 async fn run(spawner: Spawner) {
     let board = <board::Board as LoRaBoard>::init();
-    let mac = board::Board::mac_address();
-    let (radio, comm, display) = board.into_parts();
-
-    let has_display = display.is_some();
+    let parts = board.into_parts();
 
     spawner
-        .spawn(radio::radio_task(radio, &COMMANDS, &RESPONSES, &STATUS))
+        .spawn(radio::radio_task(parts.radio, &COMMANDS, &RESPONSES, &STATUS))
         .expect("spawn radio_task");
 
     spawner
         .spawn(host::host_task(
-            comm,
+            parts.host,
             &COMMANDS,
             &RESPONSES,
             &DISPLAY_COMMANDS,
-            has_display,
-            mac,
+            parts.display.is_some(),
+            parts.mac,
         ))
         .expect("spawn host_task");
 
-    if let Some(dp) = display {
+    if let Some(dp) = parts.display {
         spawner
             .spawn(display::display_task(dp, &STATUS, &DISPLAY_COMMANDS))
             .expect("spawn display_task");
