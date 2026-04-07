@@ -2,9 +2,10 @@
 pub mod traits;
 pub use traits::*;
 
-#[cfg(any(feature = "heltec_v3", feature = "heltec_v4"))]
-mod esp32s3;
-
+{% for helper, helper_features in helpers|items -%}
+#[cfg(any({% for f in helper_features %}feature = "{{ f }}"{% if not loop.last %}, {% endif %}{% endfor %}))]
+mod {{ helper }};
+{% endfor %}
 cfg_if::cfg_if! {
     {%- for board in boards %}
     {% if loop.first %}if{% else %}else if{% endif %} #[cfg(feature = "{{ board }}")] {
