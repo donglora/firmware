@@ -137,7 +137,7 @@ impl LoRaBoard for Board {
             radio,
             host,
             display,
-            led: None,
+            led: (),
             mac: Self::mac_address(),
         }
     }

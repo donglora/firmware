@@ -10,7 +10,7 @@ use esp_hal::gpio::{Level, Output, OutputConfig};
 
 use super::esp32s3;
 use super::traits::{BoardParts, LoRaBoard};
-use super::esp32s3::SimpleLed;
+use crate::driver::simple_led::SimpleLed;
 use crate::hal::esp32s3 as mcu;
 
 pub use super::esp32s3::{
@@ -18,7 +18,7 @@ pub use super::esp32s3::{
 };
 
 pub type UartDriver = esp_hal::uart::Uart<'static, esp_hal::Async>;
-pub type LedDriver = SimpleLed;
+pub type LedDriver = SimpleLed<Output<'static>>;
 
 pub struct UartParts {
     pub driver: UartDriver,
@@ -80,7 +80,7 @@ impl LoRaBoard for Board {
 
         // White LED on GPIO35
         let led_pin = Output::new(p.GPIO35, Level::Low, OutputConfig::default());
-        let led = Some(SimpleLed(led_pin));
+        let led = SimpleLed(led_pin);
 
         BoardParts {
             radio,

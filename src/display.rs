@@ -109,7 +109,7 @@ fn render_current(
 #[task]
 pub async fn display_task(
     parts: DisplayParts,
-    mut led: Option<LedDriver>,
+    mut led: LedDriver,
     status: &'static StatusWatch,
     display_commands: &'static DisplayCommandChannel,
 ) {
@@ -176,17 +176,15 @@ pub async fn display_task(
                     let _ = display.flush().await;
 
                     // Brief LED blink: red on TX, green scaled by SNR on RX
-                    if let Some(ref mut led) = led {
-                        if tx_packet {
-                            led.set_rgb(32, 0, 0).await;
-                            Timer::after_millis(50).await;
-                            led.set_rgb(0, 0, 0).await;
-                        } else if rx_packet {
-                            let b = snr_brightness(last_snr);
-                            led.set_rgb(0, b, 0).await;
-                            Timer::after_millis(50).await;
-                            led.set_rgb(0, 0, 0).await;
-                        }
+                    if tx_packet {
+                        led.set_rgb(32, 0, 0).await;
+                        Timer::after_millis(50).await;
+                        led.set_rgb(0, 0, 0).await;
+                    } else if rx_packet {
+                        let b = snr_brightness(last_snr);
+                        led.set_rgb(0, b, 0).await;
+                        Timer::after_millis(50).await;
+                        led.set_rgb(0, 0, 0).await;
                     }
                 }
             }
@@ -196,9 +194,7 @@ pub async fn display_task(
                     state.display_on = false;
                     render::blank(&mut display);
                     let _ = display.flush().await;
-                    if let Some(ref mut led) = led {
-                        led.set_rgb(0, 0, 0).await;
-                    }
+                    led.set_rgb(0, 0, 0).await;
                 }
                 DisplayCommand::On => {
                     state.disconnected = false;
@@ -213,9 +209,7 @@ pub async fn display_task(
                     state = DisplayState::new();
                     render::splash(&mut display, &board_info);
                     let _ = display.flush().await;
-                    if let Some(ref mut led) = led {
-                        led.set_rgb(0, 0, 0).await;
-                    }
+                    led.set_rgb(0, 0, 0).await;
                 }
             },
             Either3::Third(()) => {

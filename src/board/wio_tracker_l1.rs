@@ -21,21 +21,7 @@ pub type RadioDriver = Sx126x<RadioSpiDevice, Iv, Sx1262>;
 pub type UsbDriver = mcu::UsbNrfDriver;
 pub type DisplayI2c = mcu::I2cBus;
 
-// ── LED driver (green LED on P1.01) ─────────────────────────────────
-
-pub struct SimpleLed(pub Output<'static>);
-
-impl super::traits::RgbLed for SimpleLed {
-    async fn set_rgb(&mut self, r: u8, g: u8, b: u8) {
-        if r > 0 || g > 0 || b > 0 {
-            self.0.set_high();
-        } else {
-            self.0.set_low();
-        }
-    }
-}
-
-pub type LedDriver = SimpleLed;
+pub type LedDriver = crate::driver::simple_led::SimpleLed<Output<'static>>;
 
 pub type DisplayDriver = crate::driver::sh1106::Sh1106<DisplayI2c>;
 
@@ -148,7 +134,7 @@ impl LoRaBoard for Board {
 
         // Green LED on P1.01
         let led_pin = Output::new(p.P1_01, Level::Low, OutputDrive::Standard);
-        let led = Some(SimpleLed(led_pin));
+        let led = crate::driver::simple_led::SimpleLed(led_pin);
 
         BoardParts {
             radio,

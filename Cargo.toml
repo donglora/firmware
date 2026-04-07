@@ -21,6 +21,7 @@ categories = ["embedded", "hardware-support", "no-std"]
 cfg-if = "1.0"
 critical-section = "1.2"
 defmt = "1.0"
+embedded-hal = "1.0"
 embedded-hal-async = "1.0"
 embassy-embedded-hal = "0.6"
 embassy-executor = "0.9"

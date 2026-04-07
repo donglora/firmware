@@ -56,6 +56,6 @@ pub struct BoardParts<R, C, D, L> {
     pub radio: R,
     pub host: C,
     pub display: Option<D>,
-    pub led: Option<L>,
+    pub led: L,
     pub mac: [u8; 6],
 }
