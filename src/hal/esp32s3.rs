@@ -17,7 +17,9 @@ use static_cell::StaticCell;
 
 pub type SpiBus = SpiDmaBus<'static, esp_hal::Async>;
 pub type I2cBus = I2c<'static, esp_hal::Async>;
+#[allow(dead_code)] // Used by USB boards, not UART boards
 pub type UsbOtgDriver = esp_hal::otg_fs::asynch::Driver<'static>;
+#[allow(dead_code)] // Used by UART boards, not USB boards
 pub type UartDriver = esp_hal::uart::Uart<'static, esp_hal::Async>;
 
 // ── Timer ───────────────────────────────────────────────────────────
@@ -81,6 +83,7 @@ pub fn init_i2c(
 // ── USB OTG ─────────────────────────────────────────────────────────
 
 /// Initialize USB OTG FS driver for CDC-ACM.
+#[allow(dead_code)] // Used by USB boards, not UART boards
 pub fn init_usb(
     usb0: esp_hal::peripherals::USB0<'static>,
     dp: esp_hal::peripherals::GPIO20<'static>,
@@ -99,6 +102,7 @@ pub fn init_usb(
 // ── UART ────────────────────────────────────────────────────────────
 
 /// Initialize UART0 for boards with USB-UART bridge chips (e.g. CP2102).
+#[allow(dead_code)] // Used by UART boards, not USB boards
 pub fn init_uart(
     uart0: esp_hal::peripherals::UART0<'static>,
     tx: esp_hal::peripherals::GPIO43<'static>,

@@ -12,8 +12,9 @@ use embassy_sync::watch::Watch;
 
 use crate::protocol::{Command, RadioConfig, Response};
 
-/// Display commands routed from usb_task to display_task.
+/// Display commands routed from host_task to display_task.
 #[derive(Debug, Clone, Copy, defmt::Format)]
+#[allow(dead_code)] // Reset is only used by USB boards (DTR disconnect detection)
 pub enum DisplayCommand {
     On,
     Off,

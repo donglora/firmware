@@ -15,6 +15,7 @@ use crate::hal::esp32s3 as mcu;
 
 // ── Re-export MCU types ─────────────────────────────────────────────
 
+#[allow(unused_imports)] // Each board uses one of USB/UART, not both
 pub use mcu::{I2cBus as DisplayI2c, SpiBus, UartDriver, UsbOtgDriver as UsbDriver};
 
 // ── Concrete peripheral types ───────────────────────────────────────
