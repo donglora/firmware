@@ -9,6 +9,7 @@ rak_wisblock_4631  := "rak_wisblock_4631 thumbv7em-none-eabihf nRF52840_xxAA"
 wio_tracker_l1     := "wio_tracker_l1 thumbv7em-none-eabihf nRF52840_xxAA"
 
 builds_dir := "builds"
+version := `sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml`
 
 # All known boards
 boards := "heltec_v3 heltec_v4 rak_wisblock_4631 wio_tracker_l1"
@@ -76,10 +77,10 @@ flash board:
             port=$(just _find_port "303a:1001" "1209:5741" "10c4:ea60"); \
             if [ -n "$port" ]; then \
                 echo "Using $port"; \
-                espflash flash -p "$port" "{{builds_dir}}/donglora-{{board}}-release.elf"; \
+                espflash flash -p "$port" "{{builds_dir}}/donglora-{{board}}-v{{version}}.elf"; \
             else \
                 echo "No port found, falling back to espflash auto-detection..." >&2; \
-                espflash flash "{{builds_dir}}/donglora-{{board}}-release.elf"; \
+                espflash flash "{{builds_dir}}/donglora-{{board}}-v{{version}}.elf"; \
             fi ;; \
         *) just _flash_uf2 {{board}} ;; \
     esac
@@ -89,7 +90,7 @@ flash-probe board:
     @just _ensure_tools
     @just build {{board}} release
     @read -r feat target chip <<< "$(just _info {{board}})"; \
-    probe-rs run --chip $chip "{{builds_dir}}/donglora-{{board}}-release.elf"
+    probe-rs run --chip $chip "{{builds_dir}}/donglora-{{board}}-v{{version}}.elf"
 
 # Show binary size for a release build
 size board:
@@ -170,7 +171,7 @@ _copy_firmware board profile:
     @mkdir -p {{builds_dir}}
     @read -r feat target chip <<< "$(just _info {{board}})"; \
     src="target/$target/{{profile}}/donglora"; \
-    dst="{{builds_dir}}/donglora-{{board}}-{{profile}}"; \
+    dst="{{builds_dir}}/donglora-{{board}}-v{{version}}"; \
     if [ -f "$src" ]; then \
         cp "$src" "$dst.elf"; echo "→ $dst.elf"; \
         case "$target" in \
@@ -186,7 +187,7 @@ _copy_firmware board profile:
 # Copy UF2 to a mounted UF2 bootloader drive
 [private]
 _flash_uf2 board:
-    @uf2="{{builds_dir}}/donglora-{{board}}-release.uf2"; \
+    @uf2="{{builds_dir}}/donglora-{{board}}-v{{version}}.uf2"; \
     if [ ! -f "$uf2" ]; then \
         echo "error: $uf2 not found — run 'just build {{board}}' first" >&2; exit 1; \
     fi; \

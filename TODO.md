@@ -1,3 +1,4 @@
+- get the code better organized
 - firmware file naming, no "release", add version
 - LED blinking on TX/RX? colored?
 - display having board specific stuff in it
