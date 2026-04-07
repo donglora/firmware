@@ -1,0 +1,7 @@
+- firmware file naming, no "release", add version
+- LED blinking on TX/RX? colored?
+- display having board specific stuff in it
+- publish new client, mux, bridge (updates in client for UART crap)
+- try to get heltec v3 back to the right USB port+VID:PID
+- split out mux and client repos
+- move to GH organization

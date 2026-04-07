@@ -28,7 +28,11 @@ type Iv = GenericSx126xInterfaceVariant<Output<'static>, Input<'static>>;
 type RadioSpiDevice = SpiDevice<'static, NoopRawMutex, SpiBus, Nss>;
 pub type RadioDriver = Sx126x<RadioSpiDevice, Iv, Sx1262>;
 
+#[cfg(not(feature = "heltec_v3"))]
 pub type UsbDriver = esp_hal::otg_fs::asynch::Driver<'static>;
+
+#[cfg(feature = "heltec_v3")]
+pub type UartDriver = esp_hal::uart::Uart<'static, esp_hal::Async>;
 
 pub type DisplayI2c = I2c<'static, esp_hal::Async>;
 
@@ -39,8 +43,14 @@ pub struct RadioParts {
     pub delay: Delay,
 }
 
+#[cfg(not(feature = "heltec_v3"))]
 pub struct UsbParts {
     pub driver: UsbDriver,
+}
+
+#[cfg(feature = "heltec_v3")]
+pub struct UartParts {
+    pub driver: UartDriver,
 }
 
 pub struct DisplayParts {
@@ -107,7 +117,7 @@ pub fn init_radio(
 
     let sx_config = sx126x::Config {
         chip: Sx1262,
-        tcxo_ctrl: Some(sx126x::TcxoCtrlVoltage::Ctrl1V7),
+        tcxo_ctrl: Some(sx126x::TcxoCtrlVoltage::Ctrl1V8),
         use_dcdc: true,
         rx_boost: false,
     };
@@ -118,6 +128,7 @@ pub fn init_radio(
     }
 }
 
+#[cfg(not(feature = "heltec_v3"))]
 /// Initialize USB OTG CDC-ACM driver.
 pub fn init_usb(
     usb0: esp_hal::peripherals::USB0<'static>,
@@ -134,6 +145,24 @@ pub fn init_usb(
             esp_hal::otg_fs::asynch::Config::default(),
         ),
     }
+}
+
+#[cfg(feature = "heltec_v3")]
+/// Initialize UART0 for boards with USB-UART bridge chips (e.g. CP2102).
+pub fn init_uart(
+    uart0: esp_hal::peripherals::UART0<'static>,
+    tx: esp_hal::peripherals::GPIO43<'static>,
+    rx: esp_hal::peripherals::GPIO44<'static>,
+) -> UartParts {
+    use esp_hal::uart::{Config as UartConfig, Uart};
+
+    let uart = Uart::new(uart0, UartConfig::default())
+        .expect("UART init")
+        .with_tx(tx)
+        .with_rx(rx)
+        .into_async();
+
+    UartParts { driver: uart }
 }
 
 /// Initialize I2C bus for display.

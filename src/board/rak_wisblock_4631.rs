@@ -112,7 +112,7 @@ impl Board {
 
         let sx_config = sx126x::Config {
             chip: Sx1262,
-            tcxo_ctrl: Some(sx126x::TcxoCtrlVoltage::Ctrl1V7),
+            tcxo_ctrl: Some(sx126x::TcxoCtrlVoltage::Ctrl1V8),
             use_dcdc: true,
             rx_boost: false,
         };

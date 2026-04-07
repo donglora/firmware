@@ -3,11 +3,11 @@
 //! Three async tasks communicate via static channels:
 //!
 //! ```text
-//! usb_task ──Command──► radio_task ──► SX1262
-//!          ◄──Response──     │
-//!                       StatusWatch
-//!                            ▼
-//!                      display_task (optional)
+//! host_task ──Command──► radio_task ──► SX1262
+//!           ◄──Response──     │
+//!                        StatusWatch
+//!                             ▼
+//!                       display_task (optional)
 //! ```
 //!
 //! The host drives everything. The radio idles until commanded.
@@ -24,7 +24,11 @@ mod display;
 mod protocol;
 #[cfg(not(test))]
 mod radio;
-#[cfg(not(test))]
+#[cfg(all(not(test), feature = "heltec_v3"))]
+mod protocol_io;
+#[cfg(all(not(test), feature = "heltec_v3"))]
+mod uart;
+#[cfg(all(not(test), not(feature = "heltec_v3")))]
 mod usb;
 
 #[cfg(not(test))]
@@ -74,23 +78,39 @@ cfg_if::cfg_if! {
 async fn run(spawner: Spawner) {
     let board = <board::Board as LoRaBoard>::init();
     let mac = board::Board::mac_address();
-    let (radio, usb, display) = board.into_parts();
+    let (radio, comm, display) = board.into_parts();
 
     let has_display = display.is_some();
 
     spawner
         .spawn(radio::radio_task(radio, &COMMANDS, &RESPONSES, &STATUS))
         .expect("spawn radio_task");
-    spawner
-        .spawn(usb::usb_task(
-            usb,
-            &COMMANDS,
-            &RESPONSES,
-            &DISPLAY_COMMANDS,
-            has_display,
-            mac,
-        ))
-        .expect("spawn usb_task");
+
+    cfg_if::cfg_if! {
+        if #[cfg(feature = "heltec_v3")] {
+            spawner
+                .spawn(uart::uart_task(
+                    comm,
+                    &COMMANDS,
+                    &RESPONSES,
+                    &DISPLAY_COMMANDS,
+                    has_display,
+                    mac,
+                ))
+                .expect("spawn uart_task");
+        } else {
+            spawner
+                .spawn(usb::usb_task(
+                    comm,
+                    &COMMANDS,
+                    &RESPONSES,
+                    &DISPLAY_COMMANDS,
+                    has_display,
+                    mac,
+                ))
+                .expect("spawn usb_task");
+        }
+    }
 
     if let Some(dp) = display {
         spawner

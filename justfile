@@ -73,7 +73,7 @@ flash board:
     @read -r feat target chip <<< "$(just _info {{board}})"; \
     case "$target" in \
         xtensa-*) \
-            port=$(just _find_port "303a:1001" "1209:5741"); \
+            port=$(just _find_port "303a:1001" "1209:5741" "10c4:ea60"); \
             if [ -n "$port" ]; then \
                 echo "Using $port"; \
                 espflash flash -p "$port" "{{builds_dir}}/donglora-{{board}}-release.elf"; \
