@@ -5,7 +5,10 @@ use super::traits::LoRaBoard;
 use crate::hal::esp32s3 as mcu;
 
 #[allow(unused_imports)] // Re-exported for other modules (display, radio, uart tasks)
-pub use super::esp32s3::{DisplayI2c, DisplayParts, RadioDriver, RadioParts, UartDriver, UartParts};
+pub use super::esp32s3::{
+    create_display, DisplayDriver, DisplayI2c, DisplayParts, RadioDriver, RadioParts, UartDriver,
+    UartParts,
+};
 
 // ── Board init ──────────────────────────────────────────────────────
 

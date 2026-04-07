@@ -123,52 +123,10 @@ pub async fn display_task(
         mac: &mac_str,
     };
 
-    cfg_if::cfg_if! {
-        if #[cfg(feature = "wio_tracker_l1")] {
-            let mut display = crate::driver::sh1106::Sh1106::new(parts.i2c, 0x3D);
-
-            Timer::after_millis(100).await;
-
-            if display.init().await.is_err() {
-                defmt::error!("SH1106 init failed — retrying");
-                Timer::after_millis(500).await;
-                if display.init().await.is_err() {
-                    defmt::error!("SH1106 init failed twice, giving up");
-                    return;
-                }
-            }
-            if display.set_brightness(0xFF).await.is_err() {
-                defmt::warn!("display brightness set failed");
-            }
-        } else {
-            use ssd1306::mode::DisplayConfigAsync;
-            use ssd1306::prelude::DisplayRotation;
-            use ssd1306::size::DisplaySize128x64;
-            use ssd1306::{I2CDisplayInterface, Ssd1306Async};
-
-            let interface = I2CDisplayInterface::new(parts.i2c);
-            let mut display = Ssd1306Async::new(interface, DisplaySize128x64, DisplayRotation::Rotate0)
-                .into_buffered_graphics_mode();
-
-            Timer::after_millis(100).await;
-
-            if display.init().await.is_err() {
-                defmt::error!("SSD1306 init failed — retrying");
-                Timer::after_millis(500).await;
-                if display.init().await.is_err() {
-                    defmt::error!("SSD1306 init failed twice, giving up");
-                    return;
-                }
-            }
-            if display
-                .set_brightness(ssd1306::prelude::Brightness::BRIGHTEST)
-                .await
-                .is_err()
-            {
-                defmt::warn!("display brightness set failed");
-            }
-        }
-    }
+    let Some(mut display) = crate::board::create_display(parts.i2c).await else {
+        defmt::error!("display init failed, giving up");
+        return;
+    };
 
     let mut state = DisplayState::new();
     let Some(mut receiver) = status.receiver() else {

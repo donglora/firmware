@@ -21,6 +21,20 @@ pub type RadioDriver = Sx126x<RadioSpiDevice, Iv, Sx1262>;
 pub type UsbDriver = mcu::UsbNrfDriver;
 pub type DisplayI2c = mcu::I2cBus;
 
+pub type DisplayDriver = crate::driver::sh1106::Sh1106<DisplayI2c>;
+
+pub async fn create_display(i2c: DisplayI2c) -> Option<DisplayDriver> {
+    let mut display = crate::driver::sh1106::Sh1106::new(i2c, 0x3D);
+
+    embassy_time::Timer::after_millis(100).await;
+    if display.init().await.is_err() {
+        defmt::error!("SH1106 display init failed");
+        return None;
+    }
+    let _ = display.set_brightness(0xFF).await;
+    Some(display)
+}
+
 // ── Peripheral bundles ──────────────────────────────────────────────
 
 pub struct RadioParts {

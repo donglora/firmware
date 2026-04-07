@@ -21,6 +21,31 @@ pub type RadioDriver = Sx126x<RadioSpiDevice, Iv, Sx1262>;
 pub type UsbDriver = mcu::UsbNrfDriver;
 pub type DisplayI2c = mcu::I2cBus;
 
+pub type DisplayDriver = ssd1306::Ssd1306Async<
+    ssd1306::prelude::I2CInterface<DisplayI2c>,
+    ssd1306::size::DisplaySize128x64,
+    ssd1306::mode::BufferedGraphicsModeAsync<ssd1306::size::DisplaySize128x64>,
+>;
+
+pub async fn create_display(i2c: DisplayI2c) -> Option<DisplayDriver> {
+    use ssd1306::mode::DisplayConfigAsync;
+    use ssd1306::prelude::{Brightness, DisplayRotation};
+    use ssd1306::size::DisplaySize128x64;
+    use ssd1306::{I2CDisplayInterface, Ssd1306Async};
+
+    let interface = I2CDisplayInterface::new(i2c);
+    let mut display = Ssd1306Async::new(interface, DisplaySize128x64, DisplayRotation::Rotate0)
+        .into_buffered_graphics_mode();
+
+    embassy_time::Timer::after_millis(100).await;
+    if display.init().await.is_err() {
+        defmt::error!("SSD1306 display init failed");
+        return None;
+    }
+    let _ = display.set_brightness(Brightness::BRIGHTEST).await;
+    Some(display)
+}
+
 // ── Peripheral bundles ──────────────────────────────────────────────
 
 pub struct RadioParts {
