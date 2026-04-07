@@ -42,7 +42,7 @@ impl DisplayState {
             current_slot_rssi: NO_SIGNAL,
             current_slot_tx: false,
             display_on: true,
-            disconnected: true,
+            disconnected: false,
             last_status: RadioStatus::default(),
         }
     }
