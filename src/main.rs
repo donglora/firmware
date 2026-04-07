@@ -96,7 +96,7 @@ async fn run(spawner: Spawner) {
 
     if let Some(dp) = parts.display {
         spawner
-            .spawn(display::display_task(dp, &STATUS, &DISPLAY_COMMANDS))
+            .spawn(display::display_task(dp, parts.led, &STATUS, &DISPLAY_COMMANDS))
             .expect("spawn display_task");
     }
 }

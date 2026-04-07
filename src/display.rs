@@ -6,10 +6,8 @@ use embassy_time::Timer;
 use embedded_graphics::draw_target::DrawTarget;
 use embedded_graphics::pixelcolor::BinaryColor;
 
-use crate::board::DisplayParts;
+use crate::board::{Board, DisplayParts, LedDriver, LoRaBoard, RgbLed};
 use crate::channel::{DisplayCommand, DisplayCommandChannel, RadioState, RadioStatus, StatusWatch};
-
-use crate::board::{Board, LoRaBoard};
 
 use render::RSSI_HISTORY_LEN;
 
@@ -103,6 +101,7 @@ fn render_current(
 #[task]
 pub async fn display_task(
     parts: DisplayParts,
+    mut led: Option<LedDriver>,
     status: &'static StatusWatch,
     display_commands: &'static DisplayCommandChannel,
 ) {
@@ -150,12 +149,15 @@ pub async fn display_task(
                 if state.disconnected {
                     continue;
                 }
+                let rx_packet = radio_status.rx_count != state.last_status.rx_count;
+                let tx_packet = radio_status.tx_count != state.last_status.tx_count;
+
                 if let Some(rssi) = radio_status.last_rssi {
-                    if radio_status.rx_count != state.last_status.rx_count {
+                    if rx_packet {
                         state.record_rssi(rssi);
                     }
                 }
-                if radio_status.tx_count != state.last_status.tx_count {
+                if tx_packet {
                     state.record_tx();
                 }
                 state.last_status = radio_status;
@@ -163,6 +165,15 @@ pub async fn display_task(
                 if state.display_on {
                     render_current(&mut display, &state, &board_info);
                     let _ = display.flush().await;
+
+                    // Blink LED: green on RX, red on TX
+                    if let Some(ref mut led) = led {
+                        if tx_packet {
+                            led.set_rgb(32, 0, 0).await;
+                        } else if rx_packet {
+                            led.set_rgb(0, 32, 0).await;
+                        }
+                    }
                 }
             }
             Either3::Second(cmd) => match cmd {
@@ -171,6 +182,9 @@ pub async fn display_task(
                     state.display_on = false;
                     render::blank(&mut display);
                     let _ = display.flush().await;
+                    if let Some(ref mut led) = led {
+                        led.set_rgb(0, 0, 0).await;
+                    }
                 }
                 DisplayCommand::On => {
                     state.disconnected = false;
@@ -185,11 +199,17 @@ pub async fn display_task(
                     state = DisplayState::new();
                     render::splash(&mut display, &board_info);
                     let _ = display.flush().await;
+                    if let Some(ref mut led) = led {
+                        led.set_rgb(0, 0, 0).await;
+                    }
                 }
             },
             Either3::Third(()) => {
-                // Timer tick: advance sparkline slot
+                // Timer tick: advance sparkline slot, turn off LED blink
                 state.advance_slot();
+                if let Some(ref mut led) = led {
+                    led.set_rgb(0, 0, 0).await;
+                }
                 if state.display_on && state.is_active() {
                     render_current(&mut display, &state, &board_info);
                     let _ = display.flush().await;

@@ -20,6 +20,7 @@ type RadioSpiDevice = SpiDevice<'static, NoopRawMutex, mcu::SpiBus, Nss>;
 pub type RadioDriver = Sx126x<RadioSpiDevice, Iv, Sx1262>;
 pub type UsbDriver = mcu::UsbNrfDriver;
 pub type DisplayI2c = mcu::I2cBus;
+pub type LedDriver = ();
 
 pub type DisplayDriver = ssd1306::Ssd1306Async<
     ssd1306::prelude::I2CInterface<DisplayI2c>,
@@ -77,6 +78,7 @@ impl LoRaBoard for Board {
     type CommParts = UsbParts;
     type DisplayParts = DisplayParts;
     type DisplayDriver = DisplayDriver;
+    type LedDriver = ();
 
     fn init() -> Self {
         let p = embassy_nrf::init(Default::default());
@@ -87,7 +89,7 @@ impl LoRaBoard for Board {
         mcu::mac_address()
     }
 
-    fn into_parts(self) -> BoardParts<RadioParts, UsbParts, DisplayParts> {
+    fn into_parts(self) -> BoardParts<RadioParts, UsbParts, DisplayParts, ()> {
         let p = self.p;
 
         // ── SPI bus for SX1262 ──────────────────────────────────
@@ -135,6 +137,7 @@ impl LoRaBoard for Board {
             radio,
             host,
             display,
+            led: None,
             mac: Self::mac_address(),
         }
     }
