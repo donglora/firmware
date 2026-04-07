@@ -1,7 +1,8 @@
 //! Shared types and peripheral wiring for ESP32-S3 boards.
 //!
 //! Delegates MCU-level init to `hal::esp32s3` and defines peripheral-level
-//! types (RadioDriver, Parts structs) used by ESP32-S3 board files.
+//! types (RadioDriver, display) used by ESP32-S3 board files.
+//! Each board defines its own comm types (UsbParts/UartParts) directly.
 
 use embassy_embedded_hal::shared_bus::asynch::spi::SpiDevice;
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
@@ -15,8 +16,7 @@ use crate::hal::esp32s3 as mcu;
 
 // ── Re-export MCU types ─────────────────────────────────────────────
 
-#[allow(unused_imports)] // Each board uses one of USB/UART, not both
-pub use mcu::{I2cBus as DisplayI2c, SpiBus, UartDriver, UsbOtgDriver as UsbDriver};
+pub use mcu::{I2cBus as DisplayI2c, SpiBus};
 
 // ── Concrete peripheral types ───────────────────────────────────────
 
@@ -30,16 +30,6 @@ pub type RadioDriver = Sx126x<RadioSpiDevice, Iv, Sx1262>;
 pub struct RadioParts {
     pub driver: RadioDriver,
     pub delay: Delay,
-}
-
-#[allow(dead_code)] // Not used by heltec_v3_uart
-pub struct UsbParts {
-    pub driver: UsbDriver,
-}
-
-#[allow(dead_code)] // Only used by heltec_v3_uart
-pub struct UartParts {
-    pub driver: UartDriver,
 }
 
 pub struct DisplayParts {

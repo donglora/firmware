@@ -1,14 +1,19 @@
 use esp_hal::gpio::{Level, Output, OutputConfig};
+use static_cell::StaticCell;
 
 use super::esp32s3;
 use super::traits::{BoardParts, LoRaBoard};
 use crate::hal::esp32s3 as mcu;
 
-#[allow(unused_imports)] // Re-exported for other modules (display, radio, host tasks)
 pub use super::esp32s3::{
-    create_display, DisplayDriver, DisplayI2c, DisplayParts, RadioDriver, RadioParts, UsbDriver,
-    UsbParts,
+    create_display, DisplayDriver, DisplayParts, RadioDriver, RadioParts,
 };
+
+pub type UsbDriver = esp_hal::otg_fs::asynch::Driver<'static>;
+
+pub struct UsbParts {
+    pub driver: UsbDriver,
+}
 
 pub struct Board {
     p: esp_hal::peripherals::Peripherals,
@@ -45,8 +50,15 @@ impl LoRaBoard for Board {
         let radio = esp32s3::init_radio(spi_bus, p.GPIO8, p.GPIO12, p.GPIO14, p.GPIO13);
 
         // Note: switches internal USB PHY from Serial-JTAG to OTG.
+        let usb_inst = esp_hal::otg_fs::Usb::new(p.USB0, p.GPIO20, p.GPIO19);
+        static EP_OUT_BUF: StaticCell<[u8; 1024]> = StaticCell::new();
+        let ep_out_buf = EP_OUT_BUF.init([0u8; 1024]);
         let host = UsbParts {
-            driver: mcu::init_usb(p.USB0, p.GPIO20, p.GPIO19),
+            driver: esp_hal::otg_fs::asynch::Driver::new(
+                usb_inst,
+                ep_out_buf,
+                esp_hal::otg_fs::asynch::Config::default(),
+            ),
         };
 
         // SSD1315 display reset: pulse GPIO21 low->high before I2C init

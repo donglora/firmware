@@ -12,11 +12,15 @@ use super::esp32s3;
 use super::traits::{BoardParts, LoRaBoard};
 use crate::hal::esp32s3 as mcu;
 
-#[allow(unused_imports)] // Re-exported for other modules (display, radio, host tasks)
 pub use super::esp32s3::{
-    create_display, DisplayDriver, DisplayI2c, DisplayParts, RadioDriver, RadioParts, UartDriver,
-    UartParts,
+    create_display, DisplayDriver, DisplayParts, RadioDriver, RadioParts,
 };
+
+pub type UartDriver = esp_hal::uart::Uart<'static, esp_hal::Async>;
+
+pub struct UartParts {
+    pub driver: UartDriver,
+}
 
 pub struct Board {
     p: esp_hal::peripherals::Peripherals,
@@ -51,8 +55,14 @@ impl LoRaBoard for Board {
 
         let spi_bus = mcu::init_spi(p.SPI2, p.DMA_CH0, p.GPIO9, p.GPIO10, p.GPIO11);
         let radio = esp32s3::init_radio(spi_bus, p.GPIO8, p.GPIO12, p.GPIO14, p.GPIO13);
+
+        use esp_hal::uart::{Config as UartConfig, Uart};
         let host = UartParts {
-            driver: mcu::init_uart(p.UART0, p.GPIO43, p.GPIO44),
+            driver: Uart::new(p.UART0, UartConfig::default())
+                .expect("UART init")
+                .with_tx(p.GPIO43)
+                .with_rx(p.GPIO44)
+                .into_async(),
         };
 
         // SSD1306 display reset: pulse GPIO21 low->high before I2C init

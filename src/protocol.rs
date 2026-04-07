@@ -277,12 +277,11 @@ impl Response {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(not(test), derive(defmt::Format))]
 #[repr(u8)]
-#[allow(dead_code)] // CrcError reserved per PROTOCOL.md (error code 3)
 pub enum ErrorCode {
     InvalidConfig = 0,
     RadioBusy = 1,
     TxTimeout = 2,
-    CrcError = 3,
+    // 3 reserved (was CrcError — SX1262 silently drops bad-CRC packets)
     NotConfigured = 4,
     NoDisplay = 5,
 }
@@ -686,7 +685,6 @@ mod tests {
             (ErrorCode::InvalidConfig, 0),
             (ErrorCode::RadioBusy, 1),
             (ErrorCode::TxTimeout, 2),
-            (ErrorCode::CrcError, 3),
             (ErrorCode::NotConfigured, 4),
             (ErrorCode::NoDisplay, 5),
         ] {

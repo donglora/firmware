@@ -57,11 +57,11 @@ check-all:
 
 # Check a single board compiles
 check board:
-    @just _cargo {{board}} check
+    @just _cargo {{board}} "check --release"
 
 # Run clippy on a single board
 clippy board:
-    @just _cargo {{board}} "clippy" "-- -D warnings"
+    @just _cargo {{board}} "clippy --release" "-- -D warnings"
 
 # Build release firmware and copy to builds/ with a readable name
 build board profile="release":

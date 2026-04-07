@@ -6,7 +6,7 @@ use defmt::warn;
 use embassy_executor::task;
 use embedded_io_async::Write;
 
-use crate::channel::{CommandChannel, DisplayCommandChannel, ResponseChannel};
+use crate::channel::{CommandChannel, DisplayCommand, DisplayCommandChannel, ResponseChannel};
 use super::framing::{self, CobsDecoder, MAX_FRAME};
 
 #[task]
@@ -19,6 +19,11 @@ pub async fn host_task(
     mac: [u8; 6],
 ) {
     let (mut rx, mut tx) = parts.driver.split();
+
+    // UART has no DTR — signal the display that a host is present at boot.
+    if has_display {
+        display_commands.send(DisplayCommand::Reset).await;
+    }
 
     let mut read_buf = [0u8; 64];
     let mut write_buf = [0u8; MAX_FRAME];
