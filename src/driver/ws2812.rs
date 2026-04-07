@@ -43,6 +43,8 @@ impl Ws2812 {
 impl RgbLed for Ws2812 {
     async fn set_rgb(&mut self, r: u8, g: u8, b: u8) {
         let data = Self::encode(r, g, b);
-        let _ = self.channel.transmit(&data).await;
+        if let Err(e) = self.channel.transmit(&data).await {
+            defmt::warn!("WS2812 transmit error: {}", e);
+        }
     }
 }
