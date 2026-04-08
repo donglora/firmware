@@ -176,6 +176,10 @@ _copy_firmware board profile:
     if [ -f "$src" ]; then \
         cp "$src" "$dst.elf"; echo "→ $dst.elf"; \
         case "$target" in \
+            xtensa-*) \
+                mise exec -- espflash save-image --chip "$chip" --merge --skip-padding "$src" "$dst.bin"; \
+                echo "→ $dst.bin"; \
+                ;; \
             thumbv7em-*) \
                 mise exec -- rust-objcopy -O ihex "$src" "$dst.hex"; \
                 mise exec -- cargo-hex-to-uf2 hex-to-uf2 --input-path "$dst.hex" --output-path "$dst.uf2" --family nrf52840; \
