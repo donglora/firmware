@@ -113,19 +113,22 @@ pub async fn radio_task(
                         // copy_len <= MAX_PAYLOAD == Vec capacity, so this cannot fail.
                         let _ = payload.extend_from_slice(&rx_buf[..copy_len]);
 
-                        responses
-                            .send(Response::RxPacket {
+                        if responses
+                            .try_send(Response::RxPacket {
                                 rssi: pkt_status.rssi,
                                 snr: pkt_status.snr,
                                 payload,
                             })
-                            .await;
+                            .is_err()
+                        {
+                            warn!("RX packet dropped: response channel full");
+                        }
 
                         if let Err(e) = start_rx(&mut lora, &cfg).await {
                             warn!("restart RX failed: {}", e);
                             state.state = RadioState::Idle;
                             status.sender().send(state.clone());
-                            responses.send(Response::Error(ErrorCode::RadioBusy)).await;
+                            let _ = responses.try_send(Response::Error(ErrorCode::RadioBusy));
                         }
                     }
                     Err(e) => {
@@ -133,7 +136,7 @@ pub async fn radio_task(
                         if start_rx(&mut lora, &cfg).await.is_err() {
                             state.state = RadioState::Idle;
                             status.sender().send(state.clone());
-                            responses.send(Response::Error(ErrorCode::RadioBusy)).await;
+                            let _ = responses.try_send(Response::Error(ErrorCode::RadioBusy));
                         }
                     }
                 },
@@ -210,7 +213,9 @@ async fn handle_cmd(
             let _ = lora.enter_standby().await;
             state.state = RadioState::Idle;
             status.sender().send(state.clone());
-            responses.send(Response::Ok).await;
+            // try_send: StopRx may be sent internally on USB disconnect
+            // when the host isn't draining responses.
+            let _ = responses.try_send(Response::Ok);
         }
         Command::DisplayOn | Command::DisplayOff | Command::GetMac => {}
         Command::Transmit { config, payload } => {

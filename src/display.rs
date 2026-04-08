@@ -131,8 +131,15 @@ pub async fn display_task(
     };
 
     let Some(mut display) = crate::board::create_display(parts.i2c).await else {
-        defmt::error!("display init failed, giving up");
-        return;
+        defmt::error!("display init failed, running LED-only loop");
+        loop {
+            match display_commands.receive().await {
+                DisplayCommand::Reset | DisplayCommand::Off => {
+                    led.set_rgb(0, 0, 0).await;
+                }
+                DisplayCommand::On => {}
+            }
+        }
     };
 
     let mut state = DisplayState::new();
@@ -207,6 +214,7 @@ pub async fn display_task(
                 }
                 DisplayCommand::Reset => {
                     state = DisplayState::new();
+                    state.disconnected = true;
                     render::splash(&mut display, &board_info);
                     let _ = display.flush().await;
                     led.set_rgb(0, 0, 0).await;

@@ -8,6 +8,7 @@ use embassy_usb::Builder;
 use static_cell::StaticCell;
 
 use crate::channel::{CommandChannel, DisplayCommand, DisplayCommandChannel, ResponseChannel};
+use crate::protocol::Command;
 use super::framing::{self, CobsDecoder, MAX_FRAME};
 
 const MAX_PACKET: usize = 64;
@@ -126,8 +127,11 @@ async fn protocol_loop<'d, D: embassy_usb_driver::Driver<'d>>(
         }
 
         let connected = receiver.dtr();
-        if was_connected && !connected && has_display {
-            display_commands.send(DisplayCommand::Reset).await;
+        if was_connected && !connected {
+            let _ = commands.try_send(Command::StopRx);
+            if has_display {
+                display_commands.send(DisplayCommand::Reset).await;
+            }
         }
         if !was_connected && connected && has_display {
             display_commands.send(DisplayCommand::On).await;
