@@ -108,14 +108,20 @@ fn main() {
     println!("cargo:rerun-if-changed=src/board/mod.rs.j2");
     println!("cargo:rerun-if-changed={}", board_dir);
 
-    // cortex-m-rt's link.x does `INCLUDE memory.x`. Copy our nRF layout into
-    // OUT_DIR so it's only visible to ARM builds.
+    // cortex-m-rt's link.x does `INCLUDE memory.x`. Copy the correct layout
+    // into OUT_DIR based on the target MCU family.
     let target = std::env::var("TARGET").unwrap_or_default();
-    if !target.starts_with("xtensa") {
+    let memory_x = match target.as_str() {
+        "thumbv7em-none-eabihf" => Some("ld/nrf52840-memory.x"),
+        "thumbv6m-none-eabi" => Some("ld/rp2040-memory.x"),
+        _ => None,
+    };
+    if let Some(src) = memory_x {
         let out_dir = std::env::var("OUT_DIR").unwrap();
-        fs::copy("ld/nrf52840-memory.x", format!("{out_dir}/memory.x"))
-            .expect("failed to copy ld/nrf52840-memory.x");
+        fs::copy(src, format!("{out_dir}/memory.x"))
+            .expect("failed to copy memory.x");
         println!("cargo:rustc-link-search={out_dir}");
     }
     println!("cargo:rerun-if-changed=ld/nrf52840-memory.x");
+    println!("cargo:rerun-if-changed=ld/rp2040-memory.x");
 }

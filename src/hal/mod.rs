@@ -8,3 +8,6 @@ pub mod esp32s3;
 
 #[cfg(any(feature = "rak_wisblock_4631", feature = "wio_tracker_l1"))]
 pub mod nrf52840;
+
+#[cfg(feature = "waveshare_rp2040_lora")]
+pub mod rp2040;

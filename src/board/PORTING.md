@@ -7,6 +7,7 @@
 Create `src/board/your_board.rs`. Use an existing board as a template:
 - ESP32-S3 boards: copy `heltec_v4.rs` (uses shared helpers from `board/esp32s3.rs` and `hal/esp32s3.rs`)
 - nRF52840 boards: copy `rak_wisblock_4631.rs` (uses shared helpers from `hal/nrf52840.rs`)
+- RP2040 boards: copy `waveshare_rp2040_lora.rs` (uses shared helpers from `hal/rp2040.rs`)
 - New MCU family: create a new `hal/<mcu>.rs` with MCU primitives first
 
 `build.rs` auto-discovers your board file — any `.rs` file in `src/board/` that

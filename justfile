@@ -8,12 +8,13 @@ heltec_v3_uart := "heltec_v3_uart xtensa-esp32s3-none-elf esp32s3"
 heltec_v4      := "heltec_v4 xtensa-esp32s3-none-elf esp32s3"
 rak_wisblock_4631  := "rak_wisblock_4631 thumbv7em-none-eabihf nRF52840_xxAA"
 wio_tracker_l1     := "wio_tracker_l1 thumbv7em-none-eabihf nRF52840_xxAA"
+waveshare_rp2040_lora := "waveshare_rp2040_lora thumbv6m-none-eabi rp2040"
 
 builds_dir := "builds"
 version := `sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml`
 
 # All known boards
-boards := "heltec_v3 heltec_v3_uart heltec_v4 rak_wisblock_4631 wio_tracker_l1"
+boards := "heltec_v3 heltec_v3_uart heltec_v4 rak_wisblock_4631 waveshare_rp2040_lora wio_tracker_l1"
 
 # Install all required tools and toolchains
 setup:
@@ -28,7 +29,8 @@ setup:
     @if ! rustup component list --toolchain nightly --installed 2>/dev/null | grep -q "^rust-src"; then \
         rustup component add rust-src --toolchain nightly; \
     fi
-    @# ARM target
+    @# ARM targets
+    @rustup target list --installed | grep -q "^thumbv6m-none-eabi$" || rustup target add thumbv6m-none-eabi
     @rustup target list --installed | grep -q "^thumbv7em-none-eabihf$" || rustup target add thumbv7em-none-eabihf
 
 # Build release firmware for all boards, installing toolchains as needed
@@ -180,6 +182,12 @@ _copy_firmware board profile:
                 mise exec -- espflash save-image --chip "$chip" --merge --skip-padding "$src" "$dst.bin"; \
                 echo "→ $dst.bin"; \
                 ;; \
+            thumbv6m-*) \
+                mise exec -- rust-objcopy -O ihex "$src" "$dst.hex"; \
+                mise exec -- cargo-hex-to-uf2 hex-to-uf2 --input-path "$dst.hex" --output-path "$dst.uf2" --family rp2040; \
+                rm "$dst.hex"; \
+                echo "→ $dst.uf2"; \
+                ;; \
             thumbv7em-*) \
                 mise exec -- rust-objcopy -O ihex "$src" "$dst.hex"; \
                 mise exec -- cargo-hex-to-uf2 hex-to-uf2 --input-path "$dst.hex" --output-path "$dst.uf2" --family nrf52840; \
@@ -211,5 +219,6 @@ _info name:
      elif [ "{{name}}" == "heltec_v3_uart" ]; then echo "{{heltec_v3_uart}}"; \
      elif [ "{{name}}" == "heltec_v4" ]; then echo "{{heltec_v4}}"; \
      elif [ "{{name}}" == "rak_wisblock_4631" ]; then echo "{{rak_wisblock_4631}}"; \
+     elif [ "{{name}}" == "waveshare_rp2040_lora" ]; then echo "{{waveshare_rp2040_lora}}"; \
      elif [ "{{name}}" == "wio_tracker_l1" ]; then echo "{{wio_tracker_l1}}"; \
      else echo "Unknown board: {{name}}" >&2; exit 1; fi

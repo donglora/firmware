@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] - 2026-04-10
+
+### Added
+
+- Waveshare RP2040-LoRa board support (RP2040 + SX1262, no OLED, LED on GPIO25)
+  - First RP2040 board — third MCU family after ESP32-S3 and nRF52840
+  - New `hal/rp2040.rs` module with MCU primitives (SPI, USB, flash unique ID)
+  - USB-C via FPC ribbon cable to adapter board
+  - PE4259 antenna switch on GPIO17, 850-930 MHz (HF)
+
+### Changed
+
+- `cortex-m-rt/set-vtor` moved from global dependency to per-board feature
+  (Cortex-M0+ has no VTOR register)
+- `build.rs` memory.x selection is now target-aware (thumbv6m vs thumbv7em)
+
 ## [0.2.1] - 2026-04-07
 
 ### Fixed

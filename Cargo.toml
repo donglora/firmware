@@ -3,7 +3,7 @@ members = ["."]
 
 [package]
 name = "donglora"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2021"
 build = "build.rs"
 authors = ["Stephen Waits <steve@waits.net>"]
@@ -32,6 +32,7 @@ embassy-usb-driver = "0.2"
 ucobs = { version = "0.3", features = ["legacy-msrv"] }
 heapless = "0.9"
 lora-phy = "3.0"
+portable-atomic = { version = "1", optional = true, default-features = false, features = ["critical-section"] }
 static_cell = "2.1"
 
 # Display rendering
@@ -63,8 +64,10 @@ esp-rtos = { version = "0.2", optional = true, features = [
 ] }
 
 # nRF52840 (RAK 4631)
-cortex-m = { version = "0.7", optional = true, features = ["critical-section-single-core"] }
-cortex-m-rt = { version = "0.7", optional = true, features = ["set-vtor"] }
+cortex-m = { version = "0.7", optional = true, features = [
+  "critical-section-single-core",
+] }
+cortex-m-rt = { version = "0.7", optional = true }
 defmt-rtt = { version = "1.0", optional = true }
 embassy-nrf = { version = "0.10", optional = true, features = [
   "nrf52840",
@@ -73,6 +76,13 @@ embassy-nrf = { version = "0.10", optional = true, features = [
   "defmt",
 ] }
 panic-probe = { version = "1.0", optional = true, features = ["print-defmt"] }
+
+# RP2040 (Waveshare RP2040-LoRa)
+embassy-rp = { version = "0.9", optional = true, features = [
+  "rp2040",
+  "time-driver",
+  "defmt",
+] }
 
 [build-dependencies]
 minijinja = "2.18"
@@ -100,6 +110,7 @@ heltec_v4 = [
 rak_wisblock_4631 = [
   "dep:cortex-m",
   "dep:cortex-m-rt",
+  "cortex-m-rt/set-vtor",
   "dep:defmt-rtt",
   "dep:embassy-nrf",
   "dep:panic-probe",
@@ -109,9 +120,20 @@ rak_wisblock_4631 = [
 wio_tracker_l1 = [
   "dep:cortex-m",
   "dep:cortex-m-rt",
+  "cortex-m-rt/set-vtor",
   "dep:defmt-rtt",
   "dep:embassy-nrf",
   "dep:panic-probe",
+  "embassy-executor/arch-cortex-m",
+  "embassy-executor/executor-thread",
+]
+waveshare_rp2040_lora = [
+  "dep:cortex-m",
+  "dep:cortex-m-rt",
+  "dep:defmt-rtt",
+  "dep:embassy-rp",
+  "dep:panic-probe",
+  "dep:portable-atomic",
   "embassy-executor/arch-cortex-m",
   "embassy-executor/executor-thread",
 ]
@@ -122,6 +144,6 @@ undocumented_unsafe_blocks = "deny"
 [profile.release]
 codegen-units = 1
 lto = "fat"
-opt-level = 3  # "s"/"z" break Xtensa (l32r literal range exceeded)
+opt-level = 3     # "s"/"z" break Xtensa (l32r literal range exceeded)
 panic = "abort"
 strip = true

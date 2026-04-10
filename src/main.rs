@@ -41,7 +41,7 @@ use crate::channel::{CommandChannel, DisplayCommandChannel, ResponseChannel, Sta
 
 #[cfg(not(test))]
 cfg_if::cfg_if! {
-    if #[cfg(any(feature = "rak_wisblock_4631", feature = "wio_tracker_l1"))] {
+    if #[cfg(any(feature = "rak_wisblock_4631", feature = "wio_tracker_l1", feature = "waveshare_rp2040_lora"))] {
         use defmt_rtt as _;
         use panic_probe as _;
     } else if #[cfg(any(feature = "heltec_v3", feature = "heltec_v3_uart", feature = "heltec_v4"))] {
@@ -61,7 +61,7 @@ static DISPLAY_COMMANDS: DisplayCommandChannel = DisplayCommandChannel::new();
 
 #[cfg(not(test))]
 cfg_if::cfg_if! {
-    if #[cfg(any(feature = "rak_wisblock_4631", feature = "wio_tracker_l1"))] {
+    if #[cfg(any(feature = "rak_wisblock_4631", feature = "wio_tracker_l1", feature = "waveshare_rp2040_lora"))] {
         #[embassy_executor::main]
         async fn main(spawner: Spawner) {
             run(spawner).await;

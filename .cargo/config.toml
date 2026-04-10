@@ -11,3 +11,10 @@ rustflags = [
     "-C", "link-arg=-Tdefmt.x",
     "-C", "opt-level=z",
 ]
+
+[target.thumbv6m-none-eabi]
+rustflags = [
+    "-C", "link-arg=-Tlink.x",
+    "-C", "link-arg=-Tdefmt.x",
+    "-C", "opt-level=z",
+]
