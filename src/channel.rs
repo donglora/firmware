@@ -17,6 +17,7 @@ use crate::protocol::{Command, RadioConfig, Response};
 pub enum DisplayCommand {
     On,
     Off,
+    #[allow(dead_code)] // only used by USB host task, not UART
     Reset,
 }
 

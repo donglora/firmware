@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- Migrated to embassy-executor 0.10 and embassy-rp 0.10
+- ESP crates (esp-hal, esp-rtos, esp-backtrace, esp-println) patched from
+  esp-rs/esp-hal main branch until esp-rtos publishes with 0.10 support
+- Adapted to embassy-executor 0.10 SpawnToken API (task functions now return
+  `Result<SpawnToken, SpawnError>`, `Spawner::spawn` no longer returns Result)
+- Adapted to esp-hal main branch API changes: `efuse::base_mac_address()`,
+  `esp_rtos::start` now requires `SoftwareInterrupt`, embassy-rp SPI
+  constructor now requires DMA interrupt bindings
+- `just check` now runs clippy with `-D warnings` instead of plain `cargo check`
+- Rust toolchain bumped to 1.94 in mise.toml
+
+### Fixed
+
+- UART boards (heltec_v3_uart) display stuck on splash screen after boot.
+  Host task sent `DisplayCommand::Reset` (which sets disconnected=true) instead
+  of `DisplayCommand::On`. UART has no DTR, so nothing ever cleared it.
+
 ## [0.3.0] - 2026-04-10
 
 ### Added

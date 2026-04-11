@@ -20,9 +20,9 @@ pub async fn host_task(
 ) {
     let (mut rx, mut tx) = parts.driver.split();
 
-    // UART has no DTR — signal the display that a host is present at boot.
+    // UART has no DTR — assume a host is always present.
     if has_display {
-        display_commands.send(DisplayCommand::Reset).await;
+        display_commands.send(DisplayCommand::On).await;
     }
 
     let mut read_buf = [0u8; 64];

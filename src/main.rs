@@ -79,24 +79,28 @@ async fn run(spawner: Spawner) {
     let board = <board::Board as LoRaBoard>::init();
     let parts = board.into_parts();
 
-    spawner
-        .spawn(radio::radio_task(parts.radio, &COMMANDS, &RESPONSES, &STATUS))
-        .expect("spawn radio_task");
+    spawner.spawn(
+        radio::radio_task(parts.radio, &COMMANDS, &RESPONSES, &STATUS)
+            .expect("spawn radio_task"),
+    );
 
-    spawner
-        .spawn(host::host_task(
+    spawner.spawn(
+        host::host_task(
             parts.host,
             &COMMANDS,
             &RESPONSES,
             &DISPLAY_COMMANDS,
             parts.display.is_some(),
             parts.mac,
-        ))
-        .expect("spawn host_task");
+        )
+        .expect("spawn host_task"),
+    );
 
     if let Some(dp) = parts.display {
-        spawner
-            .spawn(display::display_task(dp, parts.led, &STATUS, &DISPLAY_COMMANDS))
-            .expect("spawn display_task");
+        #[allow(clippy::unit_arg)] // LedDriver is () for boards without LEDs
+        spawner.spawn(
+            display::display_task(dp, parts.led, &STATUS, &DISPLAY_COMMANDS)
+                .expect("spawn display_task"),
+        );
     }
 }

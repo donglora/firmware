@@ -21,9 +21,13 @@ pub type I2cBus = I2c<'static, esp_hal::Async>;
 // ── Timer ───────────────────────────────────────────────────────────
 
 /// Start the ESP-RTOS scheduler and Embassy time driver.
-pub fn start_timer(timg0: esp_hal::peripherals::TIMG0<'static>) {
+pub fn start_timer(
+    timg0: esp_hal::peripherals::TIMG0<'static>,
+    sw_int: esp_hal::peripherals::SW_INTERRUPT<'static>,
+) {
     let timg0 = TimerGroup::new(timg0);
-    esp_rtos::start(timg0.timer0);
+    let sw_ints = esp_hal::interrupt::software::SoftwareInterruptControl::new(sw_int);
+    esp_rtos::start(timg0.timer0, sw_ints.software_interrupt0);
 }
 
 // ── SPI bus ─────────────────────────────────────────────────────────
@@ -78,5 +82,8 @@ pub fn init_i2c(
 
 /// Read the factory-programmed MAC address from eFuse.
 pub fn mac_address() -> [u8; 6] {
-    esp_hal::efuse::Efuse::mac_address()
+    esp_hal::efuse::base_mac_address()
+        .as_bytes()
+        .try_into()
+        .expect("MAC is 6 bytes")
 }

@@ -92,7 +92,7 @@ impl LoRaBoard for Board {
         let mut spi_cfg = spi::Config::default();
         spi_cfg.frequency = 1_000_000;
         let spi = spi::Spi::new(
-            p.SPI1, p.PIN_14, p.PIN_15, p.PIN_24, p.DMA_CH0, p.DMA_CH1, spi_cfg,
+            p.SPI1, p.PIN_14, p.PIN_15, p.PIN_24, p.DMA_CH0, p.DMA_CH1, mcu::Irqs, spi_cfg,
         );
         let spi_bus = mcu::share_spi_bus(spi);
 

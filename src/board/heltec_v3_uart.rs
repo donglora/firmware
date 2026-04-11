@@ -50,7 +50,7 @@ impl LoRaBoard for Board {
     fn into_parts(self) -> BoardParts<RadioParts, UartParts, DisplayParts, LedDriver> {
         let p = self.p;
 
-        mcu::start_timer(p.TIMG0);
+        mcu::start_timer(p.TIMG0, p.SW_INTERRUPT);
 
         // Vext power: GPIO36, active LOW to enable peripherals
         let vext = Output::new(p.GPIO36, Level::Low, OutputConfig::default());

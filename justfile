@@ -57,12 +57,8 @@ check-all:
         fi; \
     done
 
-# Check a single board compiles
+# Check a single board compiles (clippy with warnings as errors)
 check board:
-    @just _cargo {{board}} "check --release"
-
-# Run clippy on a single board
-clippy board:
     @just _cargo {{board}} "clippy --release" "-- -D warnings"
 
 # Build release firmware and copy to builds/ with a readable name
@@ -105,10 +101,7 @@ test:
 
 # Check for outdated dependencies
 outdated:
-    @# embassy-executor 0.10 renamed arch-* → platform-* features.
-    @# esp-rtos 0.2 still pins embassy-executor ^0.9, blocking the upgrade.
-    @# cargo-outdated crashes trying to resolve 0.10 with the old feature name.
-    cargo outdated --exclude embassy-executor
+    cargo outdated
 
 # ── Private helpers ───────────────────────────────────────────────────
 
