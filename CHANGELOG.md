@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-04-11
+
 ### Added
 
 - ELECROW ThinkNode-M2 board support (ESP32-S3 + SX1262 + 1.3" SH1106 OLED
