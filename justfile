@@ -1,11 +1,15 @@
 set shell := ["bash", "-c"]
 
 # Board definitions: feature target chip
-# Xtensa targets use nightly cargo + esp rustc + -Zbuild-std=core.
+# Xtensa targets use the self-contained esp toolchain (espup-installed) with
+# `-Zbuild-std=core,alloc`. Using `+esp` rather than `+nightly` keeps the
+# compiler and rust-src versions aligned — the public nightly drifts ahead of
+# the esp fork and breaks core-stdlib compilation otherwise.
 # Tool versions are pinned in mise.toml; run `just setup` to install everything.
 heltec_v3      := "heltec_v3 xtensa-esp32s3-none-elf esp32s3"
 heltec_v3_uart := "heltec_v3_uart xtensa-esp32s3-none-elf esp32s3"
 heltec_v4      := "heltec_v4 xtensa-esp32s3-none-elf esp32s3"
+elecrow_thinknode_m2 := "elecrow_thinknode_m2 xtensa-esp32s3-none-elf esp32s3"
 rak_wisblock_4631  := "rak_wisblock_4631 thumbv7em-none-eabihf nRF52840_xxAA"
 wio_tracker_l1     := "wio_tracker_l1 thumbv7em-none-eabihf nRF52840_xxAA"
 waveshare_rp2040_lora := "waveshare_rp2040_lora thumbv6m-none-eabi rp2040"
@@ -14,7 +18,7 @@ builds_dir := "builds"
 version := `sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml`
 
 # All known boards
-boards := "heltec_v3 heltec_v3_uart heltec_v4 rak_wisblock_4631 waveshare_rp2040_lora wio_tracker_l1"
+boards := "heltec_v3 heltec_v3_uart heltec_v4 elecrow_thinknode_m2 rak_wisblock_4631 waveshare_rp2040_lora wio_tracker_l1"
 
 # Install all required tools and toolchains
 setup:
@@ -111,18 +115,18 @@ _ensure_tools:
     @mise trust --yes . 2>/dev/null; mise install --quiet
 
 # Run a cargo command for a board.
-# Xtensa: nightly cargo + esp rustc (via RUSTC override) + -Zbuild-std=core
+# Xtensa: esp toolchain (cargo + rustc + rust-src together) + -Zbuild-std=core
 [private]
 _cargo board cmd extra_args="":
     @just _ensure_tools
     @read -r feat target chip <<< "$(just _info {{board}})"; \
-    env=""; extra=""; \
+    extra=""; buildstd=""; \
     case "$target" in xtensa-*) \
         just _require_esp_toolchain; \
         [ -f "$HOME/export-esp.sh" ] && . "$HOME/export-esp.sh"; \
-        env="RUSTC=$(rustup which rustc --toolchain esp)"; extra="+nightly"; buildstd="-Zbuild-std=core,alloc";; \
+        extra="+esp"; buildstd="-Zbuild-std=core,alloc";; \
     esac; \
-    eval $env cargo $extra {{cmd}} --target "$target" --features "$feat" $buildstd {{extra_args}}
+    cargo $extra {{cmd}} --target "$target" --features "$feat" $buildstd {{extra_args}}
 
 # Ensure a board's toolchain is available, auto-installing if needed
 [private]
@@ -133,17 +137,15 @@ _can_build board:
         *) rustup target list --installed | grep -q "^$target$" || rustup target add "$target" ;; \
     esac
 
-# Ensure the ESP Xtensa toolchain is installed (espup installed via mise)
+# Ensure the ESP Xtensa toolchain is installed (espup installed via mise).
+# The esp toolchain ships with its own cargo, rustc, and rust-src — no extra
+# components are needed on top.
 [private]
 _require_esp_toolchain:
     @just _ensure_tools
     @if ! rustup toolchain list | grep -q "^esp"; then \
         echo "ESP toolchain not found, installing via espup (this may take a while)..." >&2; \
         espup install || { echo "error: espup install failed" >&2; exit 1; }; \
-    fi; \
-    if ! rustup component list --toolchain nightly --installed 2>/dev/null | grep -q "^rust-src"; then \
-        echo "Installing nightly rust-src (needed for -Zbuild-std)..." >&2; \
-        rustup component add rust-src --toolchain nightly || { echo "error: failed to install rust-src" >&2; exit 1; }; \
     fi
 
 # Find a serial port matching any of the given VID:PID pairs (checked in order)
@@ -211,6 +213,7 @@ _info name:
     @if [ "{{name}}" == "heltec_v3" ]; then echo "{{heltec_v3}}"; \
      elif [ "{{name}}" == "heltec_v3_uart" ]; then echo "{{heltec_v3_uart}}"; \
      elif [ "{{name}}" == "heltec_v4" ]; then echo "{{heltec_v4}}"; \
+     elif [ "{{name}}" == "elecrow_thinknode_m2" ]; then echo "{{elecrow_thinknode_m2}}"; \
      elif [ "{{name}}" == "rak_wisblock_4631" ]; then echo "{{rak_wisblock_4631}}"; \
      elif [ "{{name}}" == "waveshare_rp2040_lora" ]; then echo "{{waveshare_rp2040_lora}}"; \
      elif [ "{{name}}" == "wio_tracker_l1" ]; then echo "{{wio_tracker_l1}}"; \

@@ -23,6 +23,7 @@ All commands are run from the `firmware/` directory.
 | Heltec V3 | `heltec_v3` | ESP32-S3 | SX1262 | Native CDC-ACM | xtensa-esp32s3-none-elf |
 | Heltec V3 (UART) | `heltec_v3_uart` | ESP32-S3 | SX1262 | CP2102 bridge | xtensa-esp32s3-none-elf |
 | Heltec V4 | `heltec_v4` | ESP32-S3 | SX1262 | Native CDC-ACM | xtensa-esp32s3-none-elf |
+| ELECROW ThinkNode-M2 | `elecrow_thinknode_m2` | ESP32-S3 | SX1262 | CP2102 bridge | xtensa-esp32s3-none-elf |
 | RAK WisBlock 4631 | `rak_wisblock_4631` | nRF52840 | SX1262 | Native CDC-ACM | thumbv7em-none-eabihf |
 | Waveshare RP2040-LoRa | `waveshare_rp2040_lora` | RP2040 | SX1262 | Native CDC-ACM | thumbv6m-none-eabi |
 | Wio Tracker L1 | `wio_tracker_l1` | nRF52840 | SX1262 | Native CDC-ACM | thumbv7em-none-eabihf |

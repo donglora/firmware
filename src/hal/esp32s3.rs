@@ -6,6 +6,7 @@
 
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use esp_hal::dma::{DmaRxBuf, DmaTxBuf};
+use esp_hal::gpio::interconnect::{PeripheralInput, PeripheralOutput};
 use esp_hal::i2c::master::{Config as I2cConfig, I2c};
 use esp_hal::spi::master::{Config as SpiConfig, Spi, SpiDmaBus};
 use esp_hal::spi::Mode as SpiMode;
@@ -33,12 +34,16 @@ pub fn start_timer(
 // ── SPI bus ─────────────────────────────────────────────────────────
 
 /// Initialize SPI2 with DMA and wrap in a shared bus (StaticCell + Mutex).
+///
+/// Generic over pin type so boards with different SPI pin assignments can
+/// share this helper. Any GPIO that implements the esp-hal interconnect
+/// traits (which is every GPIO on the ESP32-S3) can be passed directly.
 pub fn init_spi(
     spi2: esp_hal::peripherals::SPI2<'static>,
     dma_ch0: esp_hal::peripherals::DMA_CH0<'static>,
-    sck: esp_hal::peripherals::GPIO9<'static>,
-    mosi: esp_hal::peripherals::GPIO10<'static>,
-    miso: esp_hal::peripherals::GPIO11<'static>,
+    sck: impl PeripheralOutput<'static>,
+    mosi: impl PeripheralOutput<'static>,
+    miso: impl PeripheralInput<'static>,
 ) -> &'static embassy_sync::mutex::Mutex<NoopRawMutex, SpiBus> {
     let spi = Spi::new(
         spi2,
@@ -66,10 +71,13 @@ pub fn init_spi(
 // ── I2C bus ─────────────────────────────────────────────────────────
 
 /// Initialize I2C0 for peripherals (display, sensors, etc.).
+///
+/// Generic over pin type. I2C lines are bidirectional (open-drain), so both
+/// `PeripheralInput` and `PeripheralOutput` bounds are required.
 pub fn init_i2c(
     i2c0: esp_hal::peripherals::I2C0<'static>,
-    sda: esp_hal::peripherals::GPIO17<'static>,
-    scl: esp_hal::peripherals::GPIO18<'static>,
+    sda: impl PeripheralInput<'static> + PeripheralOutput<'static>,
+    scl: impl PeripheralInput<'static> + PeripheralOutput<'static>,
 ) -> I2cBus {
     I2c::new(i2c0, I2cConfig::default())
         .expect("I2C init")

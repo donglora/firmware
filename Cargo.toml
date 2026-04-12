@@ -105,6 +105,12 @@ heltec_v4 = [
   "dep:esp-println",
   "dep:esp-rtos",
 ]
+elecrow_thinknode_m2 = [
+  "dep:esp-backtrace",
+  "dep:esp-hal",
+  "dep:esp-println",
+  "dep:esp-rtos",
+]
 rak_wisblock_4631 = [
   "dep:cortex-m",
   "dep:cortex-m-rt",

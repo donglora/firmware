@@ -7,7 +7,7 @@
 use embassy_embedded_hal::shared_bus::asynch::spi::SpiDevice;
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_time::Delay;
-use esp_hal::gpio::{Input, InputConfig, Level, Output, OutputConfig, Pull};
+use esp_hal::gpio::{Input, InputConfig, InputPin, Level, Output, OutputConfig, OutputPin, Pull};
 
 use lora_phy::iv::GenericSx126xInterfaceVariant;
 use lora_phy::sx126x::{self, Sx1262, Sx126x};
@@ -32,12 +32,17 @@ pub struct RadioParts {
     pub delay: Delay,
 }
 
+// SSD1306 display support is Heltec-specific. ESP32-S3 boards that use a
+// different controller (e.g. ThinkNode-M2 uses SH1106) provide their own
+// DisplayParts / DisplayDriver / create_display directly.
+#[cfg(any(feature = "heltec_v3", feature = "heltec_v3_uart", feature = "heltec_v4"))]
 pub struct DisplayParts {
     pub i2c: DisplayI2c,
 }
 
 // ── Display driver ──────────────────────────────────────────────────
 
+#[cfg(any(feature = "heltec_v3", feature = "heltec_v3_uart", feature = "heltec_v4"))]
 pub type DisplayDriver = ssd1306::Ssd1306Async<
     ssd1306::prelude::I2CInterface<DisplayI2c>,
     ssd1306::size::DisplaySize128x64,
@@ -45,6 +50,7 @@ pub type DisplayDriver = ssd1306::Ssd1306Async<
 >;
 
 /// Construct and initialize an SSD1306 display from raw I2C.
+#[cfg(any(feature = "heltec_v3", feature = "heltec_v3_uart", feature = "heltec_v4"))]
 pub async fn create_display(i2c: DisplayI2c) -> Option<DisplayDriver> {
     use ssd1306::mode::DisplayConfigAsync;
     use ssd1306::prelude::{Brightness, DisplayRotation};
@@ -67,12 +73,17 @@ pub async fn create_display(i2c: DisplayI2c) -> Option<DisplayDriver> {
 // ── Shared peripheral init helpers ──────────────────────────────────
 
 /// Construct SX1262 radio from an initialized SPI bus.
+///
+/// Generic over GPIO type so boards with different radio pin assignments can
+/// share this helper. `tcxo_voltage` selects the DIO3-driven TCXO supply:
+/// Heltec boards use `Ctrl1V8`, the ELECROW ThinkNode-M2 uses `Ctrl3V3`, etc.
 pub fn init_radio(
     spi_bus: &'static embassy_sync::mutex::Mutex<NoopRawMutex, SpiBus>,
-    nss_pin: esp_hal::peripherals::GPIO8<'static>,
-    reset_pin: esp_hal::peripherals::GPIO12<'static>,
-    dio1_pin: esp_hal::peripherals::GPIO14<'static>,
-    busy_pin: esp_hal::peripherals::GPIO13<'static>,
+    nss_pin: impl OutputPin + 'static,
+    reset_pin: impl OutputPin + 'static,
+    dio1_pin: impl InputPin + 'static,
+    busy_pin: impl InputPin + 'static,
+    tcxo_voltage: sx126x::TcxoCtrlVoltage,
 ) -> RadioParts {
     let nss = Output::new(nss_pin, Level::High, OutputConfig::default());
     let spi_device = SpiDevice::new(spi_bus, nss);
@@ -86,7 +97,7 @@ pub fn init_radio(
 
     let sx_config = sx126x::Config {
         chip: Sx1262,
-        tcxo_ctrl: Some(sx126x::TcxoCtrlVoltage::Ctrl1V8),
+        tcxo_ctrl: Some(tcxo_voltage),
         use_dcdc: true,
         rx_boost: false,
     };

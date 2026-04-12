@@ -7,8 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- ELECROW ThinkNode-M2 board support (ESP32-S3 + SX1262 + 1.3" SH1106 OLED
+  via CP2102 UART bridge, 1000 mAh Li-Po handheld)
+  - Pin map verified against Meshtastic's
+    `variants/esp32s3/ELECROW-ThinkNode-M2`
+  - DIO3 TCXO driven at 3.3 V (not 1.8 V like Heltec)
+  - Dedicated `LORA_POWER_EN` (GPIO48) sequenced HIGH before SPI init
+  - `VEXT_ENABLE` (GPIO46) is active HIGH — opposite polarity from Heltec
+  - Reuses the existing async SH1106 driver at I2C address 0x3C
+
 ### Changed
 
+- `hal::esp32s3::{init_spi, init_i2c}` and `board::esp32s3::init_radio` are
+  now generic over GPIO type, so ESP32-S3 boards with different pin
+  assignments can share the helpers.
+- `board::esp32s3::init_radio` takes a `TcxoCtrlVoltage` parameter instead
+  of hardcoding `Ctrl1V8` — needed for ThinkNode-M2's 3.3 V TCXO.
+- SSD1306 display items in `board::esp32s3` are now cfg-gated to Heltec
+  boards (ThinkNode-M2 supplies its own SH1106 `create_display`).
+- `justfile` uses `cargo +esp` for Xtensa targets instead of `cargo +nightly`
+  with a `RUSTC=esp` override — the self-contained esp toolchain keeps its
+  cargo, rustc, and rust-src versions aligned. Public nightly's rust-src
+  had drifted ahead of the esp fork, breaking `-Zbuild-std`.
 - Migrated to embassy-executor 0.10 and embassy-rp 0.10
 - ESP crates (esp-hal, esp-rtos, esp-backtrace, esp-println) patched from
   esp-rs/esp-hal main branch until esp-rtos publishes with 0.10 support
@@ -22,6 +44,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `core::mem::forget(output)` pattern in ESP32-S3 board files is now
+  `let _vext = Output::new(...)` — current esp-hal makes `Output` non-Drop,
+  which made `forget` a no-op and tripped clippy's `forget_non_drop` lint.
 - UART boards (heltec_v3_uart) display stuck on splash screen after boot.
   Host task sent `DisplayCommand::Reset` (which sets disconnected=true) instead
   of `DisplayCommand::On`. UART has no DTR, so nothing ever cleared it.

@@ -44,7 +44,7 @@ cfg_if::cfg_if! {
     if #[cfg(any(feature = "rak_wisblock_4631", feature = "wio_tracker_l1", feature = "waveshare_rp2040_lora"))] {
         use defmt_rtt as _;
         use panic_probe as _;
-    } else if #[cfg(any(feature = "heltec_v3", feature = "heltec_v3_uart", feature = "heltec_v4"))] {
+    } else if #[cfg(any(feature = "heltec_v3", feature = "heltec_v3_uart", feature = "heltec_v4", feature = "elecrow_thinknode_m2"))] {
         use esp_backtrace as _;
         use esp_println as _;
     }
@@ -66,7 +66,7 @@ cfg_if::cfg_if! {
         async fn main(spawner: Spawner) {
             run(spawner).await;
         }
-    } else if #[cfg(any(feature = "heltec_v3", feature = "heltec_v3_uart", feature = "heltec_v4"))] {
+    } else if #[cfg(any(feature = "heltec_v3", feature = "heltec_v3_uart", feature = "heltec_v4", feature = "elecrow_thinknode_m2"))] {
         #[esp_rtos::main]
         async fn main(spawner: Spawner) {
             run(spawner).await;

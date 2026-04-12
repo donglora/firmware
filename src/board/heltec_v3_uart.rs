@@ -52,12 +52,19 @@ impl LoRaBoard for Board {
 
         mcu::start_timer(p.TIMG0, p.SW_INTERRUPT);
 
-        // Vext power: GPIO36, active LOW to enable peripherals
-        let vext = Output::new(p.GPIO36, Level::Low, OutputConfig::default());
-        core::mem::forget(vext);
+        // Vext power: GPIO36, active LOW to enable peripherals.
+        // Output has no Drop impl, so the pin stays configured for program lifetime.
+        let _vext = Output::new(p.GPIO36, Level::Low, OutputConfig::default());
 
         let spi_bus = mcu::init_spi(p.SPI2, p.DMA_CH0, p.GPIO9, p.GPIO10, p.GPIO11);
-        let radio = esp32s3::init_radio(spi_bus, p.GPIO8, p.GPIO12, p.GPIO14, p.GPIO13);
+        let radio = esp32s3::init_radio(
+            spi_bus,
+            p.GPIO8,
+            p.GPIO12,
+            p.GPIO14,
+            p.GPIO13,
+            lora_phy::sx126x::TcxoCtrlVoltage::Ctrl1V8,
+        );
 
         use esp_hal::uart::{Config as UartConfig, Uart};
         let host = UartParts {
@@ -68,12 +75,12 @@ impl LoRaBoard for Board {
                 .into_async(),
         };
 
-        // SSD1306 display reset: pulse GPIO21 low->high before I2C init
+        // SSD1306 display reset: pulse GPIO21 low->high before I2C init.
+        // Output has no Drop impl; pin stays HIGH after this block.
         let mut display_rst = Output::new(p.GPIO21, Level::Low, OutputConfig::default());
         esp_hal::delay::Delay::new().delay_millis(10);
         display_rst.set_high();
         esp_hal::delay::Delay::new().delay_millis(10);
-        core::mem::forget(display_rst);
 
         let i2c = mcu::init_i2c(p.I2C0, p.GPIO17, p.GPIO18);
         let display = Some(DisplayParts { i2c });
