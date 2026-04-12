@@ -6,9 +6,7 @@ use super::traits::{BoardParts, LoRaBoard};
 use crate::driver::simple_led::SimpleLed;
 use crate::hal::esp32s3 as mcu;
 
-pub use super::esp32s3::{
-    create_display, DisplayDriver, DisplayParts, RadioDriver, RadioParts,
-};
+pub use super::esp32s3::{create_display, DisplayDriver, DisplayParts, RadioDriver, RadioParts};
 
 pub type UsbDriver = esp_hal::otg_fs::asynch::Driver<'static>;
 

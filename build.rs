@@ -118,8 +118,7 @@ fn main() {
     };
     if let Some(src) = memory_x {
         let out_dir = std::env::var("OUT_DIR").unwrap();
-        fs::copy(src, format!("{out_dir}/memory.x"))
-            .expect("failed to copy memory.x");
+        fs::copy(src, format!("{out_dir}/memory.x")).expect("failed to copy memory.x");
         println!("cargo:rustc-link-search={out_dir}");
     }
     println!("cargo:rerun-if-changed=ld/nrf52840-memory.x");

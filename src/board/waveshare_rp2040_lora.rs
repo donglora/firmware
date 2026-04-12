@@ -21,7 +21,8 @@ pub type LedDriver = crate::driver::simple_led::SimpleLed<Output<'static>>;
 
 // Display types — never instantiated (no OLED on this board), but the
 // trait requires concrete associated types that satisfy the bounds.
-pub type DisplayI2c = embassy_rp::i2c::I2c<'static, embassy_rp::peripherals::I2C0, embassy_rp::i2c::Async>;
+pub type DisplayI2c =
+    embassy_rp::i2c::I2c<'static, embassy_rp::peripherals::I2C0, embassy_rp::i2c::Async>;
 pub type DisplayDriver = ssd1306::Ssd1306Async<
     ssd1306::prelude::I2CInterface<DisplayI2c>,
     ssd1306::size::DisplaySize128x64,
@@ -78,7 +79,8 @@ impl LoRaBoard for Board {
         let p = self.p;
 
         // ── MAC address from flash unique ID ───────────────────
-        let mut flash = embassy_rp::flash::Flash::<_, _, { 2 * 1024 * 1024 }>::new_blocking(p.FLASH);
+        let mut flash =
+            embassy_rp::flash::Flash::<_, _, { 2 * 1024 * 1024 }>::new_blocking(p.FLASH);
         mcu::init_mac(&mut flash);
 
         // ── SPI1 bus for SX1262 ────────────────────────────────
@@ -92,7 +94,14 @@ impl LoRaBoard for Board {
         let mut spi_cfg = spi::Config::default();
         spi_cfg.frequency = 1_000_000;
         let spi = spi::Spi::new(
-            p.SPI1, p.PIN_14, p.PIN_15, p.PIN_24, p.DMA_CH0, p.DMA_CH1, mcu::Irqs, spi_cfg,
+            p.SPI1,
+            p.PIN_14,
+            p.PIN_15,
+            p.PIN_24,
+            p.DMA_CH0,
+            p.DMA_CH1,
+            mcu::Irqs,
+            spi_cfg,
         );
         let spi_bus = mcu::share_spi_bus(spi);
 

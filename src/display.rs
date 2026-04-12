@@ -236,7 +236,7 @@ pub async fn display_task(
 
 mod render {
     use core::fmt::Write;
-    
+
     use embedded_graphics::mono_font::ascii::{FONT_6X10, FONT_9X15_BOLD};
     use embedded_graphics::mono_font::MonoTextStyle;
     use embedded_graphics::pixelcolor::BinaryColor;
@@ -245,31 +245,31 @@ mod render {
     use embedded_graphics::text::renderer::CharacterStyle;
     use embedded_graphics::text::{Alignment, Text};
     use heapless::String;
-    
+
     use crate::channel::{RadioState, RadioStatus};
     use crate::protocol::Bandwidth;
-    
+
     /// RSSI ring buffer length — supports displays up to 256px wide (2px per bar).
     pub const RSSI_HISTORY_LEN: usize = 128;
-    
+
     // Font metrics (FONT_6X10)
     const CHAR_W: i32 = 6;
     const FONT_H: i32 = 10;
-    
+
     // Mode box: 2 chars + 1px padding each side
     const MODE_BOX_W: i32 = 2 * CHAR_W + 2; // 14px
-    
+
     // RSSI mapping range (dBm)
     const RSSI_MIN: i16 = -120;
     const RSSI_MAX: i16 = 0;
-    
+
     /// Static board identity info for display rendering.
     pub struct BoardInfo<'a> {
         pub name: &'a str,
         pub version: &'a str,
         pub mac: &'a str,
     }
-    
+
     /// Render the active dashboard (shown when radio is in RX or TX mode).
     #[allow(clippy::too_many_arguments)]
     pub fn dashboard(
@@ -294,16 +294,16 @@ mod render {
         let spark_top = sep2_y + 2; // 1px line + 1px gap above graph
         let spark_h = h - spark_top;
         let visible_bars = ((w / 2) as usize).min(RSSI_HISTORY_LEN);
-    
+
         let _ = target.clear(BinaryColor::Off);
         let style = MonoTextStyle::new(&FONT_6X10, BinaryColor::On);
         let mut buf: String<32> = String::new();
-    
+
         // ── Mode box (left column, 2 rows tall) ─────────────────────────
         let fill = PrimitiveStyle::with_fill(BinaryColor::On);
         let mut inv_style = MonoTextStyle::new(&FONT_6X10, BinaryColor::Off);
         inv_style.set_background_color(Some(BinaryColor::On));
-    
+
         match status.state {
             RadioState::Receiving => {
                 // "RX" inverted on row 0
@@ -333,16 +333,16 @@ mod render {
             }
             RadioState::Idle => {} // Not shown on active screen
         }
-    
+
         // Vertical separator between mode box and title box
         Line::new(Point::new(MODE_BOX_W, 0), Point::new(MODE_BOX_W, sep1_y))
             .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
             .draw(target)
             .ok();
-    
+
         // ── Title box (right of mode box) ───────────────────────────────
         let title_center_x = title_x + title_w / 2;
-    
+
         // Row 0: "DongLoRa v{version}"
         buf.clear();
         let _ = write!(buf, "DongLoRa v{}", board.version);
@@ -354,7 +354,7 @@ mod render {
         )
         .draw(target)
         .ok();
-    
+
         // Row 1: radio settings "{freq}/{bw}/{sf}/{cr}"
         if let Some(cfg) = status.config {
             buf.clear();
@@ -386,16 +386,16 @@ mod render {
             .draw(target)
             .ok();
         }
-    
+
         // ── First separator line ────────────────────────────────────────
         Line::new(Point::new(0, sep1_y), Point::new(w - 1, sep1_y))
             .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
             .draw(target)
             .ok();
-    
+
         // ── Info rows (centered) ────────────────────────────────────────
         let center_x = w / 2;
-    
+
         // Row 2: packet counters
         buf.clear();
         let _ = write!(
@@ -412,7 +412,7 @@ mod render {
         )
         .draw(target)
         .ok();
-    
+
         // Row 3: RSSI + SNR
         buf.clear();
         match (status.last_rssi, status.last_snr) {
@@ -434,13 +434,13 @@ mod render {
         )
         .draw(target)
         .ok();
-    
+
         // ── Second separator line ───────────────────────────────────────
         Line::new(Point::new(0, sep2_y), Point::new(w - 1, sep2_y))
             .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
             .draw(target)
             .ok();
-    
+
         // ── Sparkline bar graph ─────────────────────────────────────────
         if spark_h > 0 {
             rssi_sparkline(
@@ -456,19 +456,19 @@ mod render {
             );
         }
     }
-    
+
     /// Render the splash/waiting screen (shown when idle or no config).
     pub fn splash(target: &mut impl DrawTarget<Color = BinaryColor>, board: &BoardInfo) {
         let bb = target.bounding_box();
         let w = bb.size.width as i32;
-    
+
         let _ = target.clear(BinaryColor::Off);
         let style = MonoTextStyle::new(&FONT_6X10, BinaryColor::On);
         let title_style = MonoTextStyle::new(&FONT_9X15_BOLD, BinaryColor::On);
         let mut buf: String<32> = String::new();
-    
+
         let center_x = w / 2;
-    
+
         // Row 1: "DongLoRa" bold left, version small right
         Text::new("DongLoRa", Point::new(4, 15), title_style)
             .draw(target)
@@ -478,7 +478,7 @@ mod render {
         Text::with_alignment(&buf, Point::new(w - 2, 15), style, Alignment::Right)
             .draw(target)
             .ok();
-    
+
         // Row 2: board name
         Text::with_alignment(
             board.name,
@@ -488,7 +488,7 @@ mod render {
         )
         .draw(target)
         .ok();
-    
+
         // Row 3: MAC address
         Text::with_alignment(
             board.mac,
@@ -498,7 +498,7 @@ mod render {
         )
         .draw(target)
         .ok();
-    
+
         // Row 4: status
         Text::with_alignment(
             "Waiting for host...",
@@ -509,7 +509,7 @@ mod render {
         .draw(target)
         .ok();
     }
-    
+
     /// Format a u32 count compactly for display.
     fn compact_count(n: u32) -> String<10> {
         let mut s: String<10> = String::new();
@@ -522,7 +522,7 @@ mod render {
         }
         s
     }
-    
+
     /// Render the RSSI history as a bar-chart sparkline.
     ///
     /// The current (uncommitted) slot is rendered at the rightmost position
@@ -547,13 +547,13 @@ mod render {
             committed.min(visible_bars)
         };
         let total = hist_slots + if live { 1 } else { 0 };
-    
+
         if total == 0 {
             return;
         }
-    
+
         let fill = PrimitiveStyle::with_fill(BinaryColor::On);
-    
+
         // Draw committed history
         for i in 0..hist_slots {
             let idx = if count <= RSSI_HISTORY_LEN {
@@ -563,19 +563,22 @@ mod render {
                 i + committed.saturating_sub(effective_bars)
             } else {
                 let start = count - RSSI_HISTORY_LEN;
-                let skip =
-                    RSSI_HISTORY_LEN.saturating_sub(if live { visible_bars - 1 } else { visible_bars });
+                let skip = RSSI_HISTORY_LEN.saturating_sub(if live {
+                    visible_bars - 1
+                } else {
+                    visible_bars
+                });
                 (start + skip + i) % RSSI_HISTORY_LEN
             };
             let is_tx = tx_history[idx];
             let rssi = history[idx];
-    
+
             if let Some(bar_h) = bar_height(rssi, is_tx, spark_h) {
                 let x = (visible_bars - total + i) as i32 * 2;
                 draw_bar(target, x, bar_h, is_tx, spark_top, spark_h, &fill);
             }
         }
-    
+
         // Draw live (current) bar at the rightmost position
         if live {
             if let Some(bar_h) = bar_height(current_rssi, current_tx, spark_h) {
@@ -584,7 +587,7 @@ mod render {
             }
         }
     }
-    
+
     /// Compute the pixel height for a sparkline bar, or None to skip.
     fn bar_height(rssi: i16, is_tx: bool, spark_h: i32) -> Option<i32> {
         let h = if rssi <= RSSI_MIN {
@@ -603,7 +606,7 @@ mod render {
             Some(h)
         }
     }
-    
+
     /// Draw a single sparkline bar (solid for RX, dotted for TX).
     fn draw_bar(
         target: &mut impl DrawTarget<Color = BinaryColor>,
@@ -631,7 +634,7 @@ mod render {
                 .ok();
         }
     }
-    
+
     /// Clear the display (display-off state).
     pub fn blank(target: &mut impl DrawTarget<Color = BinaryColor>) {
         let _ = target.clear(BinaryColor::Off);

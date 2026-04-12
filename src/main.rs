@@ -80,8 +80,7 @@ async fn run(spawner: Spawner) {
     let parts = board.into_parts();
 
     spawner.spawn(
-        radio::radio_task(parts.radio, &COMMANDS, &RESPONSES, &STATUS)
-            .expect("spawn radio_task"),
+        radio::radio_task(parts.radio, &COMMANDS, &RESPONSES, &STATUS).expect("spawn radio_task"),
     );
 
     spawner.spawn(

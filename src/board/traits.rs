@@ -48,7 +48,9 @@ pub trait LoRaBoard: Sized {
     fn mac_address() -> [u8; 6];
 
     /// Decompose initialized board into peripheral bundles for each task.
-    fn into_parts(self) -> BoardParts<Self::RadioParts, Self::CommParts, Self::DisplayParts, Self::LedDriver>;
+    fn into_parts(
+        self,
+    ) -> BoardParts<Self::RadioParts, Self::CommParts, Self::DisplayParts, Self::LedDriver>;
 }
 
 /// Peripheral bundles for each firmware task, produced by [`LoRaBoard::into_parts`].

@@ -17,15 +17,14 @@ bind_interrupts!(pub struct Irqs {
 
 // ── MCU-level types ────────────────────────────────────────────────
 
-pub type SpiBus = embassy_rp::spi::Spi<'static, embassy_rp::peripherals::SPI1, embassy_rp::spi::Async>;
+pub type SpiBus =
+    embassy_rp::spi::Spi<'static, embassy_rp::peripherals::SPI1, embassy_rp::spi::Async>;
 pub type UsbRpDriver = embassy_rp::usb::Driver<'static, embassy_rp::peripherals::USB>;
 
 // ── SPI bus sharing ────────────────────────────────────────────────
 
 /// Wrap an initialized SPI peripheral in a shared bus (StaticCell + Mutex).
-pub fn share_spi_bus(
-    spi: SpiBus,
-) -> &'static embassy_sync::mutex::Mutex<NoopRawMutex, SpiBus> {
+pub fn share_spi_bus(spi: SpiBus) -> &'static embassy_sync::mutex::Mutex<NoopRawMutex, SpiBus> {
     static SPI_BUS: StaticCell<embassy_sync::mutex::Mutex<NoopRawMutex, SpiBus>> =
         StaticCell::new();
     SPI_BUS.init(embassy_sync::mutex::Mutex::new(spi))
@@ -42,7 +41,12 @@ static mut MAC_REF: Option<&'static [u8; 6]> = None;
 ///
 /// Must be called once during board init before `mac_address()`.
 pub fn init_mac<const FLASH_SIZE: usize>(
-    flash: &mut embassy_rp::flash::Flash<'_, embassy_rp::peripherals::FLASH, embassy_rp::flash::Blocking, FLASH_SIZE>,
+    flash: &mut embassy_rp::flash::Flash<
+        '_,
+        embassy_rp::peripherals::FLASH,
+        embassy_rp::flash::Blocking,
+        FLASH_SIZE,
+    >,
 ) {
     let mut uid = [0u8; 8];
     flash.blocking_unique_id(&mut uid).expect("flash unique ID");
@@ -72,7 +76,5 @@ pub fn init_mac<const FLASH_SIZE: usize>(
 pub fn mac_address() -> [u8; 6] {
     // SAFETY: MAC_REF is set once during init before the executor starts,
     // and only read (never written) after that.
-    unsafe {
-        *MAC_REF.expect("init_mac() must be called before mac_address()")
-    }
+    unsafe { *MAC_REF.expect("init_mac() must be called before mac_address()") }
 }

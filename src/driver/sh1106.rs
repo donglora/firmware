@@ -73,9 +73,9 @@ impl<I: I2c> Sh1106<I> {
         for page in 0..PAGES {
             // Set page address and column start (with SH1106 2-column offset).
             self.cmd(&[
-                0xB0 | page as u8,          // page address
-                COL_OFFSET & 0x0F, // column low nibble
-                0x10 | (COL_OFFSET >> 4),   // column high nibble
+                0xB0 | page as u8,        // page address
+                COL_OFFSET & 0x0F,        // column low nibble
+                0x10 | (COL_OFFSET >> 4), // column high nibble
             ])
             .await?;
 
@@ -90,7 +90,6 @@ impl<I: I2c> Sh1106<I> {
     pub async fn set_brightness(&mut self, value: u8) -> Result<(), I::Error> {
         self.cmd(&[0x81, value]).await
     }
-
 }
 
 impl<I: I2c> DrawTarget for Sh1106<I> {

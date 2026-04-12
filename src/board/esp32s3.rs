@@ -35,14 +35,22 @@ pub struct RadioParts {
 // SSD1306 display support is Heltec-specific. ESP32-S3 boards that use a
 // different controller (e.g. ThinkNode-M2 uses SH1106) provide their own
 // DisplayParts / DisplayDriver / create_display directly.
-#[cfg(any(feature = "heltec_v3", feature = "heltec_v3_uart", feature = "heltec_v4"))]
+#[cfg(any(
+    feature = "heltec_v3",
+    feature = "heltec_v3_uart",
+    feature = "heltec_v4"
+))]
 pub struct DisplayParts {
     pub i2c: DisplayI2c,
 }
 
 // ── Display driver ──────────────────────────────────────────────────
 
-#[cfg(any(feature = "heltec_v3", feature = "heltec_v3_uart", feature = "heltec_v4"))]
+#[cfg(any(
+    feature = "heltec_v3",
+    feature = "heltec_v3_uart",
+    feature = "heltec_v4"
+))]
 pub type DisplayDriver = ssd1306::Ssd1306Async<
     ssd1306::prelude::I2CInterface<DisplayI2c>,
     ssd1306::size::DisplaySize128x64,
@@ -50,7 +58,11 @@ pub type DisplayDriver = ssd1306::Ssd1306Async<
 >;
 
 /// Construct and initialize an SSD1306 display from raw I2C.
-#[cfg(any(feature = "heltec_v3", feature = "heltec_v3_uart", feature = "heltec_v4"))]
+#[cfg(any(
+    feature = "heltec_v3",
+    feature = "heltec_v3_uart",
+    feature = "heltec_v4"
+))]
 pub async fn create_display(i2c: DisplayI2c) -> Option<DisplayDriver> {
     use ssd1306::mode::DisplayConfigAsync;
     use ssd1306::prelude::{Brightness, DisplayRotation};

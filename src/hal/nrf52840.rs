@@ -25,9 +25,7 @@ pub type UsbNrfDriver =
 // ── SPI bus sharing ─────────────────────────────────────────────────
 
 /// Wrap an initialized SPI peripheral in a shared bus (StaticCell + Mutex).
-pub fn share_spi_bus(
-    spi: SpiBus,
-) -> &'static embassy_sync::mutex::Mutex<NoopRawMutex, SpiBus> {
+pub fn share_spi_bus(spi: SpiBus) -> &'static embassy_sync::mutex::Mutex<NoopRawMutex, SpiBus> {
     static SPI_BUS: StaticCell<embassy_sync::mutex::Mutex<NoopRawMutex, SpiBus>> =
         StaticCell::new();
     SPI_BUS.init(embassy_sync::mutex::Mutex::new(spi))

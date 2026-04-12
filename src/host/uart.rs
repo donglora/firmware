@@ -6,8 +6,8 @@ use defmt::warn;
 use embassy_executor::task;
 use embedded_io_async::Write;
 
-use crate::channel::{CommandChannel, DisplayCommand, DisplayCommandChannel, ResponseChannel};
 use super::framing::{self, CobsDecoder, MAX_FRAME};
+use crate::channel::{CommandChannel, DisplayCommand, DisplayCommandChannel, ResponseChannel};
 
 #[task]
 pub async fn host_task(
@@ -56,7 +56,12 @@ pub async fn host_task(
                 });
                 for cmd in cmds {
                     framing::route_command(
-                        cmd, commands, responses, display_commands, has_display, mac,
+                        cmd,
+                        commands,
+                        responses,
+                        display_commands,
+                        has_display,
+                        mac,
                     )
                     .await;
                 }

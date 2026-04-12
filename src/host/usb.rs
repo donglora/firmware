@@ -7,9 +7,9 @@ use embassy_usb::class::cdc_acm::{CdcAcmClass, Receiver, Sender, State};
 use embassy_usb::Builder;
 use static_cell::StaticCell;
 
+use super::framing::{self, CobsDecoder, MAX_FRAME};
 use crate::channel::{CommandChannel, DisplayCommand, DisplayCommandChannel, ResponseChannel};
 use crate::protocol::Command;
-use super::framing::{self, CobsDecoder, MAX_FRAME};
 
 const MAX_PACKET: usize = 64;
 
@@ -59,7 +59,15 @@ pub async fn host_task(
 
     join(
         usb_dev.run(),
-        protocol_loop(sender, receiver, commands, responses, display_commands, has_display, mac),
+        protocol_loop(
+            sender,
+            receiver,
+            commands,
+            responses,
+            display_commands,
+            has_display,
+            mac,
+        ),
     )
     .await;
 }
@@ -106,7 +114,12 @@ async fn protocol_loop<'d, D: embassy_usb_driver::Driver<'d>>(
                 });
                 for cmd in cmds {
                     framing::route_command(
-                        cmd, commands, responses, display_commands, has_display, mac,
+                        cmd,
+                        commands,
+                        responses,
+                        display_commands,
+                        has_display,
+                        mac,
                     )
                     .await;
                 }

@@ -128,7 +128,12 @@ impl LoRaBoard for Board {
         // ── Display (SH1106 OLED on I2C) ────────────────────────
         let twim_buf = mcu::alloc_i2c_buffer();
         let i2c = embassy_nrf::twim::Twim::new(
-            p.TWISPI0, mcu::Irqs, p.P0_06, p.P0_05, twim::Config::default(), twim_buf,
+            p.TWISPI0,
+            mcu::Irqs,
+            p.P0_06,
+            p.P0_05,
+            twim::Config::default(),
+            twim_buf,
         );
         let display = Some(DisplayParts { i2c });
 

@@ -44,8 +44,7 @@ impl CobsDecoder {
                 // End of COBS frame — decode and dispatch
                 if self.len > 0 {
                     let mut decode_buf = [0u8; MAX_FRAME];
-                    if let Some(decoded_len) =
-                        ucobs::decode(&self.buf[..self.len], &mut decode_buf)
+                    if let Some(decoded_len) = ucobs::decode(&self.buf[..self.len], &mut decode_buf)
                     {
                         if let Some(cmd) = Command::from_bytes(&decode_buf[..decoded_len]) {
                             on_command(cmd);
