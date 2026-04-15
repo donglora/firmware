@@ -1,37 +1,121 @@
-//! OLED display dashboard: radio status, sparkline, splash screen.
+//! OLED display dashboard, driven by a hsmc statechart.
+//!
+//! ```text
+//! Display
+//! ├── Off            display blank, LED off
+//! └── On
+//!     ├── Splash                         radio idle / no activity
+//!     │   ├── LearnMore   (default)      QR code + "donglora.com"
+//!     │   └── Info                       firmware version + MAC
+//!     └── Dashboard
+//!         ├── Listening   (default)      radio in RX
+//!         └── Transmitting               radio in TX
+//! ```
+//!
+//! The two Splash substates alternate on a 5 s timer via `on(after …)`
+//! transitions pointing at each other. No ticker, no timer task — hsmc
+//! handles the flip entirely inside the statechart.
+//!
+//! `CmdReset` (sent by the host task on USB disconnect) runs a reset
+//! action and re-enters `Splash`. This is order-idempotent with the
+//! `RadioIdle` that arrives from the radio at the same moment: whichever
+//! event the machine sees first, we end up in `Splash.LearnMore` with a
+//! fresh timer and a cleared run state.
+//!
+//! Display subscribes to [`RadioEventChannel`] (published by the radio task)
+//! and [`DisplayCommandChannel`] (published by the host task). Two trivial
+//! forwarder futures translate each source into [`DisplayEvent`]s on the
+//! machine's own channel — the machine is the single source of truth.
+
+use core::time::Duration;
 
 use embassy_executor::task;
-use embassy_futures::select::{select3, Either3};
+use embassy_futures::join::join3;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::channel::Channel;
 use embassy_time::Timer;
-use embedded_graphics::draw_target::DrawTarget;
-use embedded_graphics::pixelcolor::BinaryColor;
+use hsmc::statechart;
 
-use crate::board::{Board, DisplayParts, LedDriver, LoRaBoard, RgbLed};
-use crate::channel::{DisplayCommand, DisplayCommandChannel, RadioState, RadioStatus, StatusWatch};
+use crate::board::{self, Board, DisplayDriver, DisplayParts, LedDriver, LoRaBoard, RgbLed};
+use crate::channel::{
+    DisplayCommand, DisplayCommandChannel, RadioEvent, RadioEventChannel,
+};
+use crate::protocol::RadioConfig;
 
-use render::RSSI_HISTORY_LEN;
+use render::{BoardInfo, RSSI_HISTORY_LEN};
 
 const BOARD_NAME: &str = Board::NAME;
-
-/// Duration per sparkline slot. 128 slots * 1s = ~2 minutes of history.
-const SPARK_SLOT_MS: u64 = 1000;
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Sentinel: no packet received in this slot. Below SX1262 sensitivity
 /// floor (-120 dBm), so it cannot be confused with a real RSSI value.
 const NO_SIGNAL: i16 = -121;
 
-struct DisplayState {
+/// Which dashboard badge is in view (drives the RX/TX indicator only).
+#[derive(Debug, Clone, Copy)]
+pub enum Badge {
+    Rx,
+    Tx,
+}
+
+/// Fine-grained events driving the `Display` statechart.
+#[derive(Debug, Clone)]
+pub enum DisplayEvent {
+    CmdOn,
+    CmdOff,
+    CmdReset,
+    /// Radio moved into RX mode.
+    EnteredRx,
+    /// Radio moved into TX mode.
+    EnteredTx,
+    /// Radio returned to Idle.
+    RadioIdle,
+    /// A packet was received (data only — does not imply a mode change).
+    PacketRx { rssi: i16, snr: Option<i16> },
+    /// A packet was transmitted (data only — does not imply a mode change).
+    PacketTx,
+    ConfigChanged(RadioConfig),
+}
+
+impl From<RadioEvent> for DisplayEvent {
+    fn from(ev: RadioEvent) -> Self {
+        match ev {
+            RadioEvent::EnteredRx => DisplayEvent::EnteredRx,
+            RadioEvent::EnteredTx => DisplayEvent::EnteredTx,
+            RadioEvent::Idle => DisplayEvent::RadioIdle,
+            RadioEvent::PacketRx { rssi, snr } => DisplayEvent::PacketRx { rssi, snr },
+            RadioEvent::PacketTx => DisplayEvent::PacketTx,
+            RadioEvent::ConfigChanged(cfg) => DisplayEvent::ConfigChanged(cfg),
+        }
+    }
+}
+
+static DISPLAY_EVENTS: Channel<CriticalSectionRawMutex, DisplayEvent, 8> = Channel::new();
+
+// ── Context ────────────────────────────────────────────────────────
+
+/// Peripherals the display task owns for its entire lifetime.
+struct Peripherals {
+    display: DisplayDriver,
+    led: LedDriver,
+    mac_str: heapless::String<18>,
+}
+
+/// Everything `CmdReset` should clear — the dashboard's "view" of the radio.
+struct RunState {
     rssi_history: [i16; RSSI_HISTORY_LEN],
     tx_history: [bool; RSSI_HISTORY_LEN],
     rssi_count: usize,
     current_slot_rssi: i16,
     current_slot_tx: bool,
-    display_on: bool,
-    disconnected: bool,
-    last_status: RadioStatus,
+    config: Option<RadioConfig>,
+    rx_count: u32,
+    tx_count: u32,
+    last_rssi: Option<i16>,
+    last_snr: Option<i16>,
 }
 
-impl DisplayState {
+impl RunState {
     fn new() -> Self {
         Self {
             rssi_history: [NO_SIGNAL; RSSI_HISTORY_LEN],
@@ -39,25 +123,20 @@ impl DisplayState {
             rssi_count: 0,
             current_slot_rssi: NO_SIGNAL,
             current_slot_tx: false,
-            display_on: true,
-            disconnected: false,
-            last_status: RadioStatus::default(),
+            config: None,
+            rx_count: 0,
+            tx_count: 0,
+            last_rssi: None,
+            last_snr: None,
         }
     }
 
-    /// Record an RSSI sample in the current time slot (keep best).
     fn record_rssi(&mut self, rssi: i16) {
         if self.current_slot_rssi == NO_SIGNAL || rssi > self.current_slot_rssi {
             self.current_slot_rssi = rssi;
         }
     }
 
-    /// Mark the current time slot as having a transmit.
-    fn record_tx(&mut self) {
-        self.current_slot_tx = true;
-    }
-
-    /// Advance to the next time slot, committing the current slot's data.
     fn advance_slot(&mut self) {
         let idx = self.rssi_count % RSSI_HISTORY_LEN;
         self.rssi_history[idx] = self.current_slot_rssi;
@@ -66,54 +145,208 @@ impl DisplayState {
         self.current_slot_rssi = NO_SIGNAL;
         self.current_slot_tx = false;
     }
+}
 
-    /// Whether the active dashboard should be shown (RX or TX mode).
-    fn is_active(&self) -> bool {
-        matches!(
-            self.last_status.state,
-            RadioState::Receiving | RadioState::Transmitting
-        )
+pub struct DisplayContext {
+    peripherals: Peripherals,
+    run: RunState,
+}
+
+impl DisplayContext {
+    async fn flush_info(&mut self) {
+        let Peripherals { display, mac_str, .. } = &mut self.peripherals;
+        let info = BoardInfo { name: BOARD_NAME, version: VERSION, mac: mac_str };
+        render::info(display, &info);
+        let _ = display.flush().await;
+    }
+
+    async fn flush_learn_more(&mut self) {
+        let display = &mut self.peripherals.display;
+        render::learn_more(display);
+        let _ = display.flush().await;
+    }
+
+    async fn flush_dashboard(&mut self, badge: Badge) {
+        let Peripherals { display, mac_str, .. } = &mut self.peripherals;
+        let info = BoardInfo { name: BOARD_NAME, version: VERSION, mac: mac_str };
+        render::dashboard(
+            display,
+            badge,
+            self.run.config,
+            self.run.rx_count,
+            self.run.tx_count,
+            self.run.last_rssi,
+            self.run.last_snr,
+            &self.run.rssi_history,
+            &self.run.tx_history,
+            self.run.rssi_count,
+            self.run.current_slot_rssi,
+            self.run.current_slot_tx,
+            &info,
+        );
+        let _ = display.flush().await;
+    }
+
+    async fn flush_blank(&mut self) {
+        render::blank(&mut self.peripherals.display);
+        let _ = self.peripherals.display.flush().await;
+    }
+
+    async fn led_off(&mut self) {
+        self.peripherals.led.set_rgb(0, 0, 0).await;
+    }
+
+    async fn led_blip(&mut self, r: u8, g: u8, b: u8) {
+        self.peripherals.led.set_rgb(r, g, b).await;
+        Timer::after_millis(50).await;
+        self.peripherals.led.set_rgb(0, 0, 0).await;
     }
 }
+
+// ── Statechart ─────────────────────────────────────────────────────
+
+statechart! {
+    Display {
+        context: DisplayContext;
+        events: DisplayEvent;
+        default(On);
+
+        state Off {
+            entry: blank_display, turn_led_off;
+            on(CmdOn) => On;
+            // Stay off, but scrub any stale run state so reconnecting
+            // doesn't surface old counters/sparkline.
+            on(CmdReset) => reset_run_state;
+        }
+
+        state On {
+            default(Splash);
+            on(CmdOff) => Off;
+            // `CmdReset` + `RadioIdle` race on USB disconnect; this handler
+            // makes either ordering land in the same place. Reset the run
+            // state, turn off any blink-in-progress, and re-enter Splash —
+            // descend_defaults lands us in LearnMore with a fresh 5 s timer.
+            on(CmdReset) => reset_run_state, turn_led_off, Splash;
+            // Config can arrive before the dashboard is up; cache it anywhere.
+            on(ConfigChanged(cfg: RadioConfig)) => save_new_config;
+
+            state Splash {
+                default(LearnMore);
+                on(EnteredRx) => Listening;
+                on(EnteredTx) => Transmitting;
+
+                state LearnMore {
+                    entry: paint_learn_more;
+                    on(after Duration::from_secs(5)) => Info;
+                }
+
+                state Info {
+                    entry: paint_info;
+                    on(after Duration::from_secs(5)) => LearnMore;
+                }
+            }
+
+            state Dashboard {
+                default(Listening);
+                on(RadioIdle) => Splash;
+
+                // Packet events are pure data + one-shot LED feedback.
+                on(PacketRx { rssi: i16, snr: Option<i16> }) => record_rx_packet, blink_rx_led;
+                on(PacketTx) => record_tx_packet, blink_tx_led;
+
+                state Listening {
+                    entry: paint_listening;
+                    on(EnteredTx) => Transmitting;
+                    on(every Duration::from_millis(1000)) => advance_sparkline, paint_listening;
+                }
+
+                state Transmitting {
+                    entry: paint_transmitting;
+                    on(EnteredRx) => Listening;
+                    on(every Duration::from_millis(1000)) => advance_sparkline, paint_transmitting;
+                }
+            }
+        }
+    }
+}
+
+// ── Actions ────────────────────────────────────────────────────────
 
 /// Map SNR (dB) to LED brightness (4..64). Stronger signal = brighter.
 fn snr_brightness(snr: Option<i16>) -> u8 {
     let snr = snr.unwrap_or(-10);
     let clamped = snr.clamp(-20, 15) as i32;
-    // -20 → 4, +15 → 64
     ((clamped + 20) * 60 / 35 + 4) as u8
 }
 
-/// Render the appropriate screen for the current state into the display buffer.
-fn render_current(
-    display: &mut impl DrawTarget<Color = BinaryColor>,
-    state: &DisplayState,
-    board: &render::BoardInfo<'_>,
-) {
-    if state.is_active() {
-        render::dashboard(
-            display,
-            &state.last_status,
-            &state.rssi_history,
-            &state.tx_history,
-            state.rssi_count,
-            state.current_slot_rssi,
-            state.current_slot_tx,
-            board,
-        );
-    } else {
-        render::splash(display, board);
+impl DisplayActions for DisplayActionContext<'_> {
+    async fn blank_display(&mut self) {
+        self.flush_blank().await;
+    }
+
+    async fn turn_led_off(&mut self) {
+        self.led_off().await;
+    }
+
+    async fn reset_run_state(&mut self) {
+        self.run = RunState::new();
+    }
+
+    async fn paint_info(&mut self) {
+        self.flush_info().await;
+    }
+
+    async fn paint_learn_more(&mut self) {
+        self.flush_learn_more().await;
+    }
+
+    async fn paint_listening(&mut self) {
+        self.flush_dashboard(Badge::Rx).await;
+    }
+
+    async fn paint_transmitting(&mut self) {
+        self.flush_dashboard(Badge::Tx).await;
+    }
+
+    async fn record_rx_packet(&mut self, rssi: i16, snr: Option<i16>) {
+        self.run.rx_count = self.run.rx_count.wrapping_add(1);
+        self.run.last_rssi = Some(rssi);
+        self.run.last_snr = snr;
+        self.run.record_rssi(rssi);
+    }
+
+    async fn record_tx_packet(&mut self) {
+        self.run.tx_count = self.run.tx_count.wrapping_add(1);
+        self.run.current_slot_tx = true;
+    }
+
+    async fn blink_rx_led(&mut self, _rssi: i16, snr: Option<i16>) {
+        let brightness = snr_brightness(snr);
+        self.led_blip(0, brightness, 0).await;
+    }
+
+    async fn blink_tx_led(&mut self) {
+        self.led_blip(32, 0, 0).await;
+    }
+
+    async fn save_new_config(&mut self, cfg: RadioConfig) {
+        self.run.config = Some(cfg);
+    }
+
+    async fn advance_sparkline(&mut self) {
+        self.run.advance_slot();
     }
 }
+
+// ── Task entry point ───────────────────────────────────────────────
 
 #[task]
 pub async fn display_task(
     parts: DisplayParts,
     mut led: LedDriver,
-    status: &'static StatusWatch,
+    radio_events: &'static RadioEventChannel,
     display_commands: &'static DisplayCommandChannel,
 ) {
-    // Format MAC address as "XX:XX:XX:XX:XX:XX"
     let mut mac_str: heapless::String<18> = heapless::String::new();
     let m = Board::mac_address();
     let _ = core::fmt::Write::write_fmt(
@@ -124,13 +357,7 @@ pub async fn display_task(
         ),
     );
 
-    let board_info = render::BoardInfo {
-        name: BOARD_NAME,
-        version: env!("CARGO_PKG_VERSION"),
-        mac: &mac_str,
-    };
-
-    let Some(mut display) = crate::board::create_display(parts.i2c).await else {
+    let Some(display) = board::create_display(parts.i2c).await else {
         defmt::error!("display init failed, running LED-only loop");
         loop {
             match display_commands.receive().await {
@@ -142,97 +369,44 @@ pub async fn display_task(
         }
     };
 
-    let mut state = DisplayState::new();
-    let Some(mut receiver) = status.receiver() else {
-        defmt::error!("no watch receiver available for display");
-        return;
+    let ctx = DisplayContext {
+        peripherals: Peripherals {
+            display,
+            led,
+            mac_str,
+        },
+        run: RunState::new(),
     };
 
-    // Show splash/waiting screen
-    render::splash(&mut display, &board_info);
-    let _ = display.flush().await;
+    let mut machine = Display::new(ctx, &DISPLAY_EVENTS);
+    let sender = DisplaySender::from_channel(&DISPLAY_EVENTS);
 
-    loop {
-        match select3(
-            receiver.changed(),
-            display_commands.receive(),
-            Timer::after_millis(SPARK_SLOT_MS),
-        )
-        .await
-        {
-            Either3::First(radio_status) => {
-                if state.disconnected {
-                    continue;
-                }
-                let rx_packet = radio_status.rx_count != state.last_status.rx_count;
-                let tx_packet = radio_status.tx_count != state.last_status.tx_count;
+    let run = async {
+        let _ = machine.run().await;
+    };
 
-                if let Some(rssi) = radio_status.last_rssi {
-                    if rx_packet {
-                        state.record_rssi(rssi);
-                    }
-                }
-                if tx_packet {
-                    state.record_tx();
-                }
-                let last_snr = radio_status.last_snr;
-                state.last_status = radio_status;
-
-                if state.display_on {
-                    render_current(&mut display, &state, &board_info);
-                    let _ = display.flush().await;
-
-                    // Brief LED blink: red on TX, green scaled by SNR on RX
-                    if tx_packet {
-                        led.set_rgb(32, 0, 0).await;
-                        Timer::after_millis(50).await;
-                        led.set_rgb(0, 0, 0).await;
-                    } else if rx_packet {
-                        let b = snr_brightness(last_snr);
-                        led.set_rgb(0, b, 0).await;
-                        Timer::after_millis(50).await;
-                        led.set_rgb(0, 0, 0).await;
-                    }
-                }
-            }
-            Either3::Second(cmd) => match cmd {
-                DisplayCommand::Off => {
-                    state.disconnected = false;
-                    state.display_on = false;
-                    render::blank(&mut display);
-                    let _ = display.flush().await;
-                    led.set_rgb(0, 0, 0).await;
-                }
-                DisplayCommand::On => {
-                    state.disconnected = false;
-                    state.display_on = true;
-                    if let Some(s) = receiver.try_get() {
-                        state.last_status = s;
-                    }
-                    render_current(&mut display, &state, &board_info);
-                    let _ = display.flush().await;
-                }
-                DisplayCommand::Reset => {
-                    state = DisplayState::new();
-                    state.disconnected = true;
-                    render::splash(&mut display, &board_info);
-                    let _ = display.flush().await;
-                    led.set_rgb(0, 0, 0).await;
-                }
-            },
-            Either3::Third(()) => {
-                // Timer tick: advance sparkline slot
-                state.advance_slot();
-                if state.display_on && state.is_active() {
-                    render_current(&mut display, &state, &board_info);
-                    let _ = display.flush().await;
-                }
-            }
+    let command_forwarder = async {
+        loop {
+            let ev = match display_commands.receive().await {
+                DisplayCommand::On => DisplayEvent::CmdOn,
+                DisplayCommand::Off => DisplayEvent::CmdOff,
+                DisplayCommand::Reset => DisplayEvent::CmdReset,
+            };
+            let _ = sender.send(ev).await;
         }
-    }
+    };
+
+    let radio_event_forwarder = async {
+        loop {
+            let ev = radio_events.receive().await;
+            let _ = sender.send(ev.into()).await;
+        }
+    };
+
+    join3(run, command_forwarder, radio_event_forwarder).await;
 }
 
-// ── Rendering ───────────────────────────────────────────────────────
+// ── Rendering ──────────────────────────────────────────────────────
 
 mod render {
     use core::fmt::Write;
@@ -246,35 +420,106 @@ mod render {
     use embedded_graphics::text::{Alignment, Text};
     use heapless::String;
 
-    use crate::channel::{RadioState, RadioStatus};
-    use crate::protocol::Bandwidth;
+    use super::Badge;
+    use crate::protocol::{Bandwidth, RadioConfig};
 
-    /// RSSI ring buffer length — supports displays up to 256px wide (2px per bar).
     pub const RSSI_HISTORY_LEN: usize = 128;
 
-    // Font metrics (FONT_6X10)
     const CHAR_W: i32 = 6;
     const FONT_H: i32 = 10;
+    const MODE_BOX_W: i32 = 2 * CHAR_W + 2;
 
-    // Mode box: 2 chars + 1px padding each side
-    const MODE_BOX_W: i32 = 2 * CHAR_W + 2; // 14px
-
-    // RSSI mapping range (dBm)
     const RSSI_MIN: i16 = -120;
     const RSSI_MAX: i16 = 0;
 
-    /// Static board identity info for display rendering.
+    /// Hand-authored 64 × 64 pixel-perfect QR bitmap for the splash
+    /// "learn more" screen. 1 bit/pixel, MSB-first, row-major. Bit `1` is
+    /// "light" (OLED pixel on), bit `0` is "dark" (OLED pixel off), so
+    /// when drawn with `BinaryColor::On` = lit, the QR appears with the
+    /// traditional dark-on-light look including a proper quiet zone.
+    const QR_WIDTH_PX: u32 = 64;
+    const QR_BITMAP: [u8; 512] = [
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0xFE, 0x00, 0x07, 0x9F, 0xFE, 0x60, 0x00, 0x7F,
+        0xFE, 0x00, 0x07, 0x9F, 0xFE, 0x60, 0x00, 0x7F,
+        0xFE, 0x7F, 0xE6, 0x18, 0x19, 0xE7, 0xFE, 0x7F,
+        0xFE, 0x7F, 0xE6, 0x18, 0x19, 0xE7, 0xFE, 0x7F,
+        0xFE, 0x60, 0x67, 0x81, 0xE6, 0x66, 0x06, 0x7F,
+        0xFE, 0x60, 0x67, 0x81, 0xE6, 0x66, 0x06, 0x7F,
+        0xFE, 0x60, 0x66, 0x19, 0x87, 0xE6, 0x06, 0x7F,
+        0xFE, 0x60, 0x66, 0x19, 0x87, 0xE6, 0x06, 0x7F,
+        0xFE, 0x60, 0x67, 0xE6, 0x1F, 0xE6, 0x06, 0x7F,
+        0xFE, 0x60, 0x67, 0xE6, 0x1F, 0xE6, 0x06, 0x7F,
+        0xFE, 0x7F, 0xE6, 0x67, 0x80, 0x67, 0xFE, 0x7F,
+        0xFE, 0x7F, 0xE6, 0x67, 0x80, 0x67, 0xFE, 0x7F,
+        0xFE, 0x00, 0x06, 0x66, 0x66, 0x60, 0x00, 0x7F,
+        0xFE, 0x00, 0x06, 0x66, 0x66, 0x60, 0x00, 0x7F,
+        0xFF, 0xFF, 0xFF, 0xFE, 0x61, 0xFF, 0xFF, 0xFF,
+        0xFF, 0xFF, 0xFF, 0xFE, 0x61, 0xFF, 0xFF, 0xFF,
+        0xFE, 0x00, 0x60, 0x06, 0x01, 0x99, 0x99, 0xFF,
+        0xFE, 0x00, 0x60, 0x06, 0x01, 0x99, 0x99, 0xFF,
+        0xFE, 0x01, 0x98, 0x1F, 0x9E, 0x79, 0xF9, 0xFF,
+        0xFE, 0x01, 0x98, 0x1F, 0x9E, 0x79, 0xF9, 0xFF,
+        0xFF, 0xE0, 0x66, 0x18, 0x61, 0x9F, 0x98, 0x7F,
+        0xFF, 0xE0, 0x66, 0x18, 0x61, 0x9F, 0x98, 0x7F,
+        0xFF, 0x98, 0x1E, 0x01, 0xE7, 0x99, 0xFE, 0x7F,
+        0xFF, 0x98, 0x1E, 0x01, 0xE7, 0x99, 0xFE, 0x7F,
+        0xFF, 0xE1, 0xE6, 0x19, 0xF8, 0x06, 0x60, 0x7F,
+        0xFF, 0xE1, 0xE6, 0x19, 0xF8, 0x06, 0x60, 0x7F,
+        0xFE, 0x19, 0xF8, 0x06, 0x1E, 0x79, 0x99, 0xFF,
+        0xFE, 0x19, 0xF8, 0x06, 0x1E, 0x79, 0x99, 0xFF,
+        0xFE, 0x7E, 0x01, 0xFF, 0x80, 0x18, 0x18, 0x7F,
+        0xFE, 0x7E, 0x01, 0xFF, 0x80, 0x18, 0x18, 0x7F,
+        0xFE, 0x7E, 0x19, 0x9E, 0x1E, 0x78, 0x7E, 0x7F,
+        0xFE, 0x7E, 0x19, 0x9E, 0x1E, 0x78, 0x7E, 0x7F,
+        0xFE, 0x60, 0x06, 0x66, 0x66, 0x00, 0x67, 0xFF,
+        0xFE, 0x60, 0x06, 0x66, 0x66, 0x00, 0x67, 0xFF,
+        0xFF, 0xFF, 0xFE, 0x67, 0xF8, 0x7E, 0x1F, 0xFF,
+        0xFF, 0xFF, 0xFE, 0x67, 0xF8, 0x7E, 0x1F, 0xFF,
+        0xFE, 0x00, 0x06, 0x00, 0x7E, 0x66, 0x60, 0x7F,
+        0xFE, 0x00, 0x06, 0x00, 0x7E, 0x66, 0x60, 0x7F,
+        0xFE, 0x7F, 0xE7, 0x99, 0xE6, 0x7E, 0x1E, 0x7F,
+        0xFE, 0x7F, 0xE7, 0x99, 0xE6, 0x7E, 0x1E, 0x7F,
+        0xFE, 0x60, 0x66, 0x61, 0xF8, 0x00, 0x60, 0x7F,
+        0xFE, 0x60, 0x66, 0x61, 0xF8, 0x00, 0x60, 0x7F,
+        0xFE, 0x60, 0x66, 0x06, 0x01, 0x86, 0x00, 0x7F,
+        0xFE, 0x60, 0x66, 0x06, 0x01, 0x86, 0x00, 0x7F,
+        0xFE, 0x60, 0x66, 0x67, 0x86, 0x7F, 0x86, 0x7F,
+        0xFE, 0x60, 0x66, 0x67, 0x86, 0x7F, 0x86, 0x7F,
+        0xFE, 0x7F, 0xE6, 0x66, 0x18, 0x00, 0x1E, 0x7F,
+        0xFE, 0x7F, 0xE6, 0x66, 0x18, 0x00, 0x1E, 0x7F,
+        0xFE, 0x00, 0x06, 0x66, 0x67, 0x98, 0x00, 0x7F,
+        0xFE, 0x00, 0x06, 0x66, 0x67, 0x98, 0x00, 0x7F,
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    ];
+
     pub struct BoardInfo<'a> {
         pub name: &'a str,
         pub version: &'a str,
         pub mac: &'a str,
     }
 
-    /// Render the active dashboard (shown when radio is in RX or TX mode).
     #[allow(clippy::too_many_arguments)]
     pub fn dashboard(
         target: &mut impl DrawTarget<Color = BinaryColor>,
-        status: &RadioStatus,
+        badge: Badge,
+        config: Option<RadioConfig>,
+        rx_count: u32,
+        tx_count: u32,
+        last_rssi: Option<i16>,
+        last_snr: Option<i16>,
         rssi_history: &[i16; RSSI_HISTORY_LEN],
         tx_history: &[bool; RSSI_HISTORY_LEN],
         rssi_count: usize,
@@ -288,10 +533,10 @@ mod render {
         let title_x = MODE_BOX_W + 1;
         let title_w = w - title_x;
         let header_h = 2 * FONT_H;
-        let sep1_y = header_h + 3; // 3px gap below header text (clears descenders)
-        let info_y = sep1_y + 1; // 1px line, info text tight below separator
-        let sep2_y = info_y + 2 * FONT_H + 3; // 3px gap below info text (clears descenders)
-        let spark_top = sep2_y + 2; // 1px line + 1px gap above graph
+        let sep1_y = header_h + 3;
+        let info_y = sep1_y + 1;
+        let sep2_y = info_y + 2 * FONT_H + 3;
+        let spark_top = sep2_y + 2;
         let spark_h = h - spark_top;
         let visible_bars = ((w / 2) as usize).min(RSSI_HISTORY_LEN);
 
@@ -299,14 +544,12 @@ mod render {
         let style = MonoTextStyle::new(&FONT_6X10, BinaryColor::On);
         let mut buf: String<32> = String::new();
 
-        // ── Mode box (left column, 2 rows tall) ─────────────────────────
         let fill = PrimitiveStyle::with_fill(BinaryColor::On);
         let mut inv_style = MonoTextStyle::new(&FONT_6X10, BinaryColor::Off);
         inv_style.set_background_color(Some(BinaryColor::On));
 
-        match status.state {
-            RadioState::Receiving => {
-                // "RX" inverted on row 0
+        match badge {
+            Badge::Rx => {
                 Rectangle::new(
                     Point::new(0, 0),
                     Size::new(MODE_BOX_W as u32, FONT_H as u32),
@@ -318,8 +561,7 @@ mod render {
                     .draw(target)
                     .ok();
             }
-            RadioState::Transmitting => {
-                // "TX" inverted on row 1
+            Badge::Tx => {
                 Rectangle::new(
                     Point::new(0, FONT_H),
                     Size::new(MODE_BOX_W as u32, FONT_H as u32),
@@ -331,19 +573,15 @@ mod render {
                     .draw(target)
                     .ok();
             }
-            RadioState::Idle => {} // Not shown on active screen
         }
 
-        // Vertical separator between mode box and title box
         Line::new(Point::new(MODE_BOX_W, 0), Point::new(MODE_BOX_W, sep1_y))
             .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
             .draw(target)
             .ok();
 
-        // ── Title box (right of mode box) ───────────────────────────────
         let title_center_x = title_x + title_w / 2;
 
-        // Row 0: "DongLoRa v{version}"
         buf.clear();
         let _ = write!(buf, "DongLoRa v{}", board.version);
         Text::with_alignment(
@@ -355,8 +593,7 @@ mod render {
         .draw(target)
         .ok();
 
-        // Row 1: radio settings "{freq}/{bw}/{sf}/{cr}"
-        if let Some(cfg) = status.config {
+        if let Some(cfg) = config {
             buf.clear();
             let freq_mhz = cfg.freq_hz / 1_000_000;
             let freq_khz = (cfg.freq_hz % 1_000_000) / 1_000;
@@ -387,22 +624,19 @@ mod render {
             .ok();
         }
 
-        // ── First separator line ────────────────────────────────────────
         Line::new(Point::new(0, sep1_y), Point::new(w - 1, sep1_y))
             .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
             .draw(target)
             .ok();
 
-        // ── Info rows (centered) ────────────────────────────────────────
         let center_x = w / 2;
 
-        // Row 2: packet counters
         buf.clear();
         let _ = write!(
             buf,
             "RX:{} TX:{}",
-            compact_count(status.rx_count),
-            compact_count(status.tx_count)
+            compact_count(rx_count),
+            compact_count(tx_count)
         );
         Text::with_alignment(
             &buf,
@@ -413,9 +647,8 @@ mod render {
         .draw(target)
         .ok();
 
-        // Row 3: RSSI + SNR
         buf.clear();
-        match (status.last_rssi, status.last_snr) {
+        match (last_rssi, last_snr) {
             (Some(rssi), Some(snr)) => {
                 let _ = write!(buf, "RSSI:{}dBm SNR:{}dB", rssi, snr);
             }
@@ -435,13 +668,11 @@ mod render {
         .draw(target)
         .ok();
 
-        // ── Second separator line ───────────────────────────────────────
         Line::new(Point::new(0, sep2_y), Point::new(w - 1, sep2_y))
             .into_styled(PrimitiveStyle::with_stroke(BinaryColor::On, 1))
             .draw(target)
             .ok();
 
-        // ── Sparkline bar graph ─────────────────────────────────────────
         if spark_h > 0 {
             rssi_sparkline(
                 target,
@@ -457,8 +688,7 @@ mod render {
         }
     }
 
-    /// Render the splash/waiting screen (shown when idle or no config).
-    pub fn splash(target: &mut impl DrawTarget<Color = BinaryColor>, board: &BoardInfo) {
+    pub fn info(target: &mut impl DrawTarget<Color = BinaryColor>, board: &BoardInfo) {
         let bb = target.bounding_box();
         let w = bb.size.width as i32;
 
@@ -469,7 +699,6 @@ mod render {
 
         let center_x = w / 2;
 
-        // Row 1: "DongLoRa" bold left, version small right
         Text::new("DongLoRa", Point::new(4, 15), title_style)
             .draw(target)
             .ok();
@@ -479,7 +708,6 @@ mod render {
             .draw(target)
             .ok();
 
-        // Row 2: board name
         Text::with_alignment(
             board.name,
             Point::new(center_x, 28),
@@ -489,7 +717,6 @@ mod render {
         .draw(target)
         .ok();
 
-        // Row 3: MAC address
         Text::with_alignment(
             board.mac,
             Point::new(center_x, 41),
@@ -499,7 +726,6 @@ mod render {
         .draw(target)
         .ok();
 
-        // Row 4: status
         Text::with_alignment(
             "Waiting for host...",
             Point::new(center_x, 54),
@@ -510,7 +736,68 @@ mod render {
         .ok();
     }
 
-    /// Format a u32 count compactly for display.
+    /// Alternate splash screen: 64 × 64 pixel-perfect QR bitmap on the
+    /// right (with its own quiet zone baked in), centered text column on
+    /// the left inviting the user to visit the URL.
+    pub fn learn_more(target: &mut impl DrawTarget<Color = BinaryColor>) {
+        use embedded_graphics::image::{Image, ImageRaw};
+        use embedded_graphics::mono_font::ascii::{FONT_5X8, FONT_7X14_BOLD};
+
+        let bb = target.bounding_box();
+        let w = bb.size.width as i32;
+
+        let _ = target.clear(BinaryColor::Off);
+
+        // ── QR code: flush to the right edge, 1:1 pixel rendering ───
+        let qr_x = w - QR_WIDTH_PX as i32;
+        let qr_raw: ImageRaw<BinaryColor> = ImageRaw::new(&QR_BITMAP, QR_WIDTH_PX);
+        Image::new(&qr_raw, Point::new(qr_x, 0))
+            .draw(target)
+            .ok();
+
+        // ── Text column (everything left of the QR) ─────────────────
+        let col_w = qr_x;
+        let col_center = col_w / 2;
+
+        let title_style = MonoTextStyle::new(&FONT_7X14_BOLD, BinaryColor::On);
+        let text_style = MonoTextStyle::new(&FONT_5X8, BinaryColor::On);
+
+        // Layout on a 64 px display:
+        //   blank
+        //   DongLoRa        baseline 22
+        //   blank
+        //   Learn more:     baseline 42
+        //   donglora.com    baseline 52
+        //   blank
+
+        Text::with_alignment(
+            "DongLoRa",
+            Point::new(col_center, 22),
+            title_style,
+            Alignment::Center,
+        )
+        .draw(target)
+        .ok();
+
+        Text::with_alignment(
+            "Learn more:",
+            Point::new(col_center, 42),
+            text_style,
+            Alignment::Center,
+        )
+        .draw(target)
+        .ok();
+
+        Text::with_alignment(
+            "donglora.com",
+            Point::new(col_center, 52),
+            text_style,
+            Alignment::Center,
+        )
+        .draw(target)
+        .ok();
+    }
+
     fn compact_count(n: u32) -> String<10> {
         let mut s: String<10> = String::new();
         if n > 9_999_999 {
@@ -523,10 +810,6 @@ mod render {
         s
     }
 
-    /// Render the RSSI history as a bar-chart sparkline.
-    ///
-    /// The current (uncommitted) slot is rendered at the rightmost position
-    /// so that incoming packets appear on the graph immediately.
     #[allow(clippy::too_many_arguments)]
     fn rssi_sparkline(
         target: &mut impl DrawTarget<Color = BinaryColor>,
@@ -554,11 +837,8 @@ mod render {
 
         let fill = PrimitiveStyle::with_fill(BinaryColor::On);
 
-        // Draw committed history
         for i in 0..hist_slots {
             let idx = if count <= RSSI_HISTORY_LEN {
-                // Buffer hasn't wrapped: slots occupy indices 0..committed-1.
-                // Skip oldest entries that don't fit on screen.
                 let effective_bars = if live { visible_bars - 1 } else { visible_bars };
                 i + committed.saturating_sub(effective_bars)
             } else {
@@ -579,7 +859,6 @@ mod render {
             }
         }
 
-        // Draw live (current) bar at the rightmost position
         if live {
             if let Some(bar_h) = bar_height(current_rssi, current_tx, spark_h) {
                 let x = (visible_bars - 1) as i32 * 2;
@@ -588,7 +867,6 @@ mod render {
         }
     }
 
-    /// Compute the pixel height for a sparkline bar, or None to skip.
     fn bar_height(rssi: i16, is_tx: bool, spark_h: i32) -> Option<i32> {
         let h = if rssi <= RSSI_MIN {
             if is_tx {
@@ -607,7 +885,6 @@ mod render {
         }
     }
 
-    /// Draw a single sparkline bar (solid for RX, dotted for TX).
     fn draw_bar(
         target: &mut impl DrawTarget<Color = BinaryColor>,
         x: i32,
@@ -635,7 +912,6 @@ mod render {
         }
     }
 
-    /// Clear the display (display-off state).
     pub fn blank(target: &mut impl DrawTarget<Color = BinaryColor>) {
         let _ = target.clear(BinaryColor::Off);
     }

@@ -37,7 +37,7 @@ use embassy_executor::Spawner;
 #[cfg(not(test))]
 use crate::board::LoRaBoard;
 #[cfg(not(test))]
-use crate::channel::{CommandChannel, DisplayCommandChannel, ResponseChannel, StatusWatch};
+use crate::channel::{CommandChannel, DisplayCommandChannel, RadioEventChannel, ResponseChannel};
 
 #[cfg(not(test))]
 cfg_if::cfg_if! {
@@ -55,7 +55,7 @@ static COMMANDS: CommandChannel = CommandChannel::new();
 #[cfg(not(test))]
 static RESPONSES: ResponseChannel = ResponseChannel::new();
 #[cfg(not(test))]
-static STATUS: StatusWatch = StatusWatch::new();
+static RADIO_EVENTS: RadioEventChannel = RadioEventChannel::new();
 #[cfg(not(test))]
 static DISPLAY_COMMANDS: DisplayCommandChannel = DisplayCommandChannel::new();
 
@@ -80,7 +80,8 @@ async fn run(spawner: Spawner) {
     let parts = board.into_parts();
 
     spawner.spawn(
-        radio::radio_task(parts.radio, &COMMANDS, &RESPONSES, &STATUS).expect("spawn radio_task"),
+        radio::radio_task(parts.radio, &COMMANDS, &RESPONSES, &RADIO_EVENTS)
+            .expect("spawn radio_task"),
     );
 
     spawner.spawn(
@@ -98,7 +99,7 @@ async fn run(spawner: Spawner) {
     if let Some(dp) = parts.display {
         #[allow(clippy::unit_arg)] // LedDriver is () for boards without LEDs
         spawner.spawn(
-            display::display_task(dp, parts.led, &STATUS, &DISPLAY_COMMANDS)
+            display::display_task(dp, parts.led, &RADIO_EVENTS, &DISPLAY_COMMANDS)
                 .expect("spawn display_task"),
         );
     }

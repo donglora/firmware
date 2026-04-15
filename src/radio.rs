@@ -1,8 +1,9 @@
 //! LoRa radio task: SX1262 state machine driven by host commands.
 //!
-//! Owns the radio peripheral exclusively. Receives [`Command`]s from the USB
-//! task, drives the SX1262 via [`lora_phy`], and sends [`Response`]s back.
-//! Publishes [`RadioStatus`] to the display task via a watch channel.
+//! Owns the radio peripheral exclusively. Receives [`Command`]s from the
+//! host task, drives the SX1262 via [`lora_phy`], and sends [`Response`]s
+//! back. Publishes typed [`RadioEvent`]s to the display task at every state
+//! transition and RF event — no shared status snapshot, no diffing consumer.
 //!
 //! # State machine
 //!
@@ -11,11 +12,6 @@
 //!   │                    │
 //!   └──Transmit──► Transmitting ──TxDone──► (previous state)
 //! ```
-//!
-//! # Invariants
-//!
-//! - This task never panics. All errors are reported to the host or logged.
-//! - Config is validated before use (see [`RadioConfig::validate`]).
 
 use defmt::{error, info, warn};
 use embassy_executor::task;
@@ -25,40 +21,58 @@ use lora_phy::mod_params::RadioError;
 use lora_phy::{LoRa, RxMode};
 
 use crate::board::{Board, LoRaBoard, RadioDriver, RadioParts};
-use crate::channel::{CommandChannel, RadioState, RadioStatus, ResponseChannel, StatusWatch};
+use crate::channel::{CommandChannel, RadioEvent, RadioEventChannel, ResponseChannel};
 use crate::protocol::{self, Command, ErrorCode, RadioConfig, Response};
 
 const MAX_PAYLOAD: usize = protocol::MAX_PAYLOAD;
-// TX power range comes from the board trait: Board::TX_POWER_RANGE
 
 type Radio = LoRa<RadioDriver, Delay>;
 
 // ── Fixed LoRa radio parameters ─────────────────────────────────────
-//
-// These are intentionally not host-configurable. They are sensible
-// defaults for a general-purpose LoRa pipe. Making them configurable
-// would add protocol complexity for marginal benefit.
-
-/// Explicit header mode (variable-length packets).
 const IMPLICIT_HEADER: bool = false;
-
-/// Enable CRC on received/transmitted packets.
 const CRC_ON: bool = true;
-
-/// Standard IQ polarity (not inverted).
 const IQ_INVERTED: bool = false;
 
-// ── Task entry point ────────────────────────────────────────────────
+/// Internal mode, just for tracking what the radio is doing right now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    Idle,
+    Receiving,
+    Transmitting,
+}
+
+/// Runtime state not exposed outside this module.
+struct RadioState {
+    mode: Mode,
+    config: Option<RadioConfig>,
+}
+
+impl RadioState {
+    fn new() -> Self {
+        Self {
+            mode: Mode::Idle,
+            config: None,
+        }
+    }
+}
+
+/// Emit a radio event to the display subscriber. Best-effort: if the
+/// downstream queue is full we'd rather drop a UI update than stall the
+/// radio task.
+fn emit(events: &RadioEventChannel, ev: RadioEvent) {
+    if events.try_send(ev).is_err() {
+        warn!("radio event dropped: downstream queue full");
+    }
+}
 
 #[task]
 pub async fn radio_task(
     parts: RadioParts,
     commands: &'static CommandChannel,
     responses: &'static ResponseChannel,
-    status: &'static StatusWatch,
+    events: &'static RadioEventChannel,
 ) {
-    let mut state = RadioStatus::default();
-    status.sender().send(state.clone());
+    let mut state = RadioState::new();
 
     let mut lora = match LoRa::new(parts.driver, false, parts.delay).await {
         Ok(l) => l,
@@ -85,14 +99,15 @@ pub async fn radio_task(
     let mut rx_buf = [0u8; MAX_PAYLOAD];
 
     loop {
-        if state.state == RadioState::Receiving {
-            // Defensive: config must be Some when Receiving. If not, recover.
+        if state.mode == Mode::Receiving {
+            // `Mode::Receiving` is only set after `start_rx` succeeded with
+            // a validated config; we rely on that here.
             let cfg = match state.config {
                 Some(c) => c,
                 None => {
                     warn!("BUG: receiving without config, returning to idle");
-                    state.state = RadioState::Idle;
-                    status.sender().send(state.clone());
+                    state.mode = Mode::Idle;
+                    emit(events, RadioEvent::Idle);
                     continue;
                 }
             };
@@ -100,17 +115,19 @@ pub async fn radio_task(
             match select(rx_once(&mut lora, &cfg, &mut rx_buf), commands.receive()).await {
                 Either::First(rx_result) => match rx_result {
                     Ok((len, pkt_status)) => {
-                        state.rx_count = state.rx_count.wrapping_add(1);
-                        state.last_rssi = Some(pkt_status.rssi);
-                        state.last_snr = Some(pkt_status.snr);
-                        status.sender().send(state.clone());
+                        emit(
+                            events,
+                            RadioEvent::PacketRx {
+                                rssi: pkt_status.rssi,
+                                snr: Some(pkt_status.snr),
+                            },
+                        );
 
                         let copy_len = (len as usize).min(MAX_PAYLOAD);
                         if (len as usize) > copy_len {
                             warn!("RX payload truncated: {} > {}", len, MAX_PAYLOAD);
                         }
                         let mut payload = heapless::Vec::new();
-                        // copy_len <= MAX_PAYLOAD == Vec capacity, so this cannot fail.
                         let _ = payload.extend_from_slice(&rx_buf[..copy_len]);
 
                         if responses
@@ -126,39 +143,39 @@ pub async fn radio_task(
 
                         if let Err(e) = start_rx(&mut lora, &cfg).await {
                             warn!("restart RX failed: {}", e);
-                            state.state = RadioState::Idle;
-                            status.sender().send(state.clone());
+                            state.mode = Mode::Idle;
+                            emit(events, RadioEvent::Idle);
                             let _ = responses.try_send(Response::Error(ErrorCode::RadioBusy));
                         }
                     }
                     Err(e) => {
                         warn!("RX error: {}", e);
                         if start_rx(&mut lora, &cfg).await.is_err() {
-                            state.state = RadioState::Idle;
-                            status.sender().send(state.clone());
+                            state.mode = Mode::Idle;
+                            emit(events, RadioEvent::Idle);
                             let _ = responses.try_send(Response::Error(ErrorCode::RadioBusy));
                         }
                     }
                 },
                 Either::Second(cmd) => {
-                    handle_cmd(cmd, &mut lora, &mut state, responses, status).await;
+                    handle_cmd(cmd, &mut lora, &mut state, responses, events).await;
                 }
             }
         } else {
             let cmd = commands.receive().await;
-            handle_cmd(cmd, &mut lora, &mut state, responses, status).await;
+            handle_cmd(cmd, &mut lora, &mut state, responses, events).await;
         }
     }
 }
 
-// ── Command handler ─────────────────────────────────────────────────
+
 
 async fn handle_cmd(
     cmd: Command,
     lora: &mut Radio,
-    state: &mut RadioStatus,
+    state: &mut RadioState,
     responses: &ResponseChannel,
-    status: &StatusWatch,
+    events: &RadioEventChannel,
 ) {
     match cmd {
         Command::Ping => {
@@ -180,9 +197,9 @@ async fn handle_cmd(
                     .send(Response::Error(ErrorCode::InvalidConfig))
                     .await;
             } else {
-                // Resolve TX_POWER_MAX sentinel to board's actual max
-                state.config = Some(cfg.resolve(Board::TX_POWER_RANGE));
-                status.sender().send(state.clone());
+                let resolved = cfg.resolve(Board::TX_POWER_RANGE);
+                state.config = Some(resolved);
+                emit(events, RadioEvent::ConfigChanged(resolved));
                 responses.send(Response::Ok).await;
             }
         }
@@ -190,8 +207,8 @@ async fn handle_cmd(
             if let Some(cfg) = state.config {
                 match start_rx(lora, &cfg).await {
                     Ok(()) => {
-                        state.state = RadioState::Receiving;
-                        status.sender().send(state.clone());
+                        state.mode = Mode::Receiving;
+                        emit(events, RadioEvent::EnteredRx);
                         responses.send(Response::Ok).await;
                     }
                     Err(e) => {
@@ -208,13 +225,11 @@ async fn handle_cmd(
             }
         }
         Command::StopRx => {
-            // Best-effort: if standby fails, radio is in unknown state
-            // but there's nothing useful we can do except continue.
             let _ = lora.enter_standby().await;
-            state.state = RadioState::Idle;
-            status.sender().send(state.clone());
-            // try_send: StopRx may be sent internally on USB disconnect
-            // when the host isn't draining responses.
+            if state.mode != Mode::Idle {
+                state.mode = Mode::Idle;
+                emit(events, RadioEvent::Idle);
+            }
             let _ = responses.try_send(Response::Ok);
         }
         Command::DisplayOn | Command::DisplayOff | Command::GetMac => {}
@@ -222,50 +237,54 @@ async fn handle_cmd(
             let tx_config = config
                 .map(|c| c.resolve(Board::TX_POWER_RANGE))
                 .or(state.config);
-            if let Some(cfg) = tx_config {
-                if let Err(reason) = cfg.validate(Board::TX_POWER_RANGE) {
-                    warn!("TX config rejected: {}", reason);
-                    responses
-                        .send(Response::Error(ErrorCode::InvalidConfig))
-                        .await;
-                    return;
-                }
-
-                let was_receiving = state.state == RadioState::Receiving;
-                state.state = RadioState::Transmitting;
-                status.sender().send(state.clone());
-
-                match do_tx(lora, &cfg, &payload).await {
-                    Ok(()) => {
-                        state.tx_count = state.tx_count.wrapping_add(1);
-                        responses.send(Response::TxDone).await;
-                    }
-                    Err(e) => {
-                        warn!("TX failed: {}", e);
-                        responses.send(Response::Error(ErrorCode::TxTimeout)).await;
-                    }
-                }
-
-                // Restore previous state. If we were receiving, restart RX
-                // using the stored config — NOT the per-packet TX override.
-                state.state = if was_receiving {
-                    // state.config is always Some when was_receiving (invariant).
-                    let rx_cfg = state.config.unwrap_or(cfg);
-                    match start_rx(lora, &rx_cfg).await {
-                        Ok(()) => RadioState::Receiving,
-                        Err(e) => {
-                            warn!("post-TX RX restart failed: {}", e);
-                            RadioState::Idle
-                        }
-                    }
-                } else {
-                    RadioState::Idle
-                };
-                status.sender().send(state.clone());
-            } else {
+            let Some(cfg) = tx_config else {
                 responses
                     .send(Response::Error(ErrorCode::NotConfigured))
                     .await;
+                return;
+            };
+            if let Err(reason) = cfg.validate(Board::TX_POWER_RANGE) {
+                warn!("TX config rejected: {}", reason);
+                responses
+                    .send(Response::Error(ErrorCode::InvalidConfig))
+                    .await;
+                return;
+            }
+
+            let was_receiving = state.mode == Mode::Receiving;
+            state.mode = Mode::Transmitting;
+            emit(events, RadioEvent::EnteredTx);
+
+            let tx_result = do_tx(lora, &cfg, &payload).await;
+            match tx_result {
+                Ok(()) => {
+                    emit(events, RadioEvent::PacketTx);
+                    responses.send(Response::TxDone).await;
+                }
+                Err(e) => {
+                    warn!("TX failed: {}", e);
+                    responses.send(Response::Error(ErrorCode::TxTimeout)).await;
+                }
+            }
+
+            // Restore previous mode — and announce the transition explicitly
+            // so downstream consumers don't have to infer it.
+            if was_receiving {
+                let rx_cfg = state.config.unwrap_or(cfg);
+                match start_rx(lora, &rx_cfg).await {
+                    Ok(()) => {
+                        state.mode = Mode::Receiving;
+                        emit(events, RadioEvent::EnteredRx);
+                    }
+                    Err(e) => {
+                        warn!("post-TX RX restart failed: {}", e);
+                        state.mode = Mode::Idle;
+                        emit(events, RadioEvent::Idle);
+                    }
+                }
+            } else {
+                state.mode = Mode::Idle;
+                emit(events, RadioEvent::Idle);
             }
         }
     }
@@ -321,7 +340,6 @@ fn to_cr(cr: u8) -> lora_phy::mod_params::CodingRate {
     }
 }
 
-/// Create modulation parameters from a validated config.
 fn modulation_params(
     lora: &mut Radio,
     cfg: &RadioConfig,
@@ -359,20 +377,17 @@ async fn rx_once(
     lora.rx(&pkt, buf).await
 }
 
-/// Maximum CAD attempts before transmitting anyway.
 const CAD_MAX_RETRIES: u8 = 10;
 
 async fn do_tx(lora: &mut Radio, cfg: &RadioConfig, payload: &[u8]) -> Result<(), RadioError> {
     let mdltn = modulation_params(lora, cfg)?;
 
-    // Listen-before-talk: check channel is clear before transmitting.
     if cfg.cad_enabled() {
         lora.prepare_for_cad(&mdltn).await?;
         for _ in 0..CAD_MAX_RETRIES {
             if !lora.cad(&mdltn).await? {
-                break; // Channel is clear
+                break;
             }
-            // Channel busy — wait briefly and retry
             embassy_time::Timer::after_millis(10).await;
             lora.prepare_for_cad(&mdltn).await?;
         }

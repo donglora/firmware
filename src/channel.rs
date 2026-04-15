@@ -1,14 +1,12 @@
 //! Inter-task communication channels.
 //!
-//! Each channel connects exactly two tasks:
 //! - [`CommandChannel`]: USB → Radio (host commands)
 //! - [`ResponseChannel`]: Radio → USB (firmware responses)
 //! - [`DisplayCommandChannel`]: USB → Display (on/off/reset)
-//! - [`StatusWatch`]: Radio → Display (observable radio state)
+//! - [`RadioEventChannel`]: Radio → Display (typed events from the radio)
 
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
-use embassy_sync::watch::Watch;
 
 use crate::protocol::{Command, RadioConfig, Response};
 
@@ -30,39 +28,27 @@ pub type CommandChannel = Channel<CriticalSectionRawMutex, Command, 16>;
 /// Radio-to-host response channel (depth 32: buffer RX packets while USB writes).
 pub type ResponseChannel = Channel<CriticalSectionRawMutex, Response, 32>;
 
-/// Observable radio status for the display task (2 receivers max).
-/// Display always sees the latest state — intermediate updates may be
-/// skipped, which is fine for a status display.
-pub type StatusWatch = Watch<CriticalSectionRawMutex, RadioStatus, 2>;
-
-/// Current radio state exposed to observers (e.g. display).
+/// Radio → downstream typed events. The radio task emits one of these at
+/// every mode transition and every RF packet. Mode events and data events
+/// are separate: `EnteredRx` / `EnteredTx` / `Idle` describe what the radio
+/// is *doing now*, while `PacketRx` / `PacketTx` describe *what just
+/// happened* without implying a mode change.
 #[derive(Debug, Clone, defmt::Format)]
-pub struct RadioStatus {
-    pub state: RadioState,
-    pub config: Option<RadioConfig>,
-    pub rx_count: u32,
-    pub tx_count: u32,
-    pub last_rssi: Option<i16>,
-    pub last_snr: Option<i16>,
-}
-
-/// Radio state machine states.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, defmt::Format)]
-pub enum RadioState {
+pub enum RadioEvent {
+    /// Radio is now in RX mode.
+    EnteredRx,
+    /// Radio is now in TX mode.
+    EnteredTx,
+    /// Radio is now idle.
     Idle,
-    Receiving,
-    Transmitting,
+    /// A packet was received with these link metrics.
+    PacketRx { rssi: i16, snr: Option<i16> },
+    /// A packet was transmitted successfully.
+    PacketTx,
+    /// `SetConfig` applied a new validated config.
+    ConfigChanged(RadioConfig),
 }
 
-impl Default for RadioStatus {
-    fn default() -> Self {
-        Self {
-            state: RadioState::Idle,
-            config: None,
-            rx_count: 0,
-            tx_count: 0,
-            last_rssi: None,
-            last_snr: None,
-        }
-    }
-}
+/// Radio → Display event stream (depth 32: buffer RX bursts while the
+/// display drains slowly).
+pub type RadioEventChannel = Channel<CriticalSectionRawMutex, RadioEvent, 32>;

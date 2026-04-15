@@ -97,17 +97,8 @@ async fn protocol_loop<'d, D: embassy_usb_driver::Driver<'d>>(
         )
         .await
         {
-            Either3::First(result) => {
-                let n = match result {
-                    Ok(0) => continue,
-                    Ok(n) => n,
-                    Err(_) => {
-                        decoder.reset();
-                        embassy_time::Timer::after_millis(100).await;
-                        continue;
-                    }
-                };
-
+            Either3::First(Ok(0)) => {}
+            Either3::First(Ok(n)) => {
                 let mut cmds = heapless::Vec::<_, 4>::new();
                 decoder.feed(&read_buf[..n], |cmd| {
                     let _ = cmds.push(cmd);
@@ -123,6 +114,15 @@ async fn protocol_loop<'d, D: embassy_usb_driver::Driver<'d>>(
                     )
                     .await;
                 }
+            }
+            Either3::First(Err(_)) => {
+                // read errored — usually a USB disconnect. Drop the
+                // decoder state and back off briefly so we don't spin at
+                // I/O rate. Crucially: DO NOT `continue` — we need the
+                // DTR check below to run so the display gets its
+                // `CmdReset` and the radio gets its `StopRx`.
+                decoder.reset();
+                embassy_time::Timer::after_millis(100).await;
             }
             Either3::Second(response) => {
                 if let Some(frame) =

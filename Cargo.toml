@@ -30,6 +30,7 @@ embassy-usb-driver = "0.2"
 ucobs = { version = "0.3", features = ["legacy-msrv"] }
 heapless = "0.9"
 donglora-protocol = { path = "../protocol" }
+hsmc = { path = "../../hsmc/hsmc", default-features = false, features = ["embassy"] }
 lora-phy = "3.0"
 portable-atomic = { version = "1", optional = true, default-features = false, features = ["critical-section"] }
 static_cell = "2.1"
@@ -88,31 +89,43 @@ minijinja = "2.18"
 owo-colors = "4.3"
 
 [features]
+# The `embassy` feature gates the async-actions codepath inside the `hsmc`
+# statechart macro. Its `#[cfg(feature = "embassy")]` attributes are
+# evaluated in *this* crate's context (a proc-macro cfg quirk), so every
+# board feature must enable it. `tokio` is declared only to silence the
+# macro's `#[cfg(feature = "tokio")]` checks.
+embassy = []
+tokio = []
 heltec_v3 = [
+  "embassy",
   "dep:esp-backtrace",
   "dep:esp-hal",
   "dep:esp-println",
   "dep:esp-rtos",
 ]
 heltec_v3_uart = [
+  "embassy",
   "dep:esp-backtrace",
   "dep:esp-hal",
   "dep:esp-println",
   "dep:esp-rtos",
 ]
 heltec_v4 = [
+  "embassy",
   "dep:esp-backtrace",
   "dep:esp-hal",
   "dep:esp-println",
   "dep:esp-rtos",
 ]
 elecrow_thinknode_m2 = [
+  "embassy",
   "dep:esp-backtrace",
   "dep:esp-hal",
   "dep:esp-println",
   "dep:esp-rtos",
 ]
 rak_wisblock_4631 = [
+  "embassy",
   "dep:cortex-m",
   "dep:cortex-m-rt",
   "cortex-m-rt/set-vtor",
@@ -123,6 +136,7 @@ rak_wisblock_4631 = [
   "embassy-executor/executor-thread",
 ]
 wio_tracker_l1 = [
+  "embassy",
   "dep:cortex-m",
   "dep:cortex-m-rt",
   "cortex-m-rt/set-vtor",
@@ -133,6 +147,7 @@ wio_tracker_l1 = [
   "embassy-executor/executor-thread",
 ]
 waveshare_rp2040_lora = [
+  "embassy",
   "dep:cortex-m",
   "dep:cortex-m-rt",
   "dep:defmt-rtt",
