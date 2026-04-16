@@ -96,6 +96,13 @@ owo-colors = "4.3"
 # macro's `#[cfg(feature = "tokio")]` checks.
 embassy = []
 tokio = []
+# When enabled, replaces the display task with a LED-based diagnostic
+# blinker driven by `crate::debug_blink::CHECKPOINT`. Used for diagnosing
+# the firmware on UART-only boards where defmt output would corrupt the
+# host protocol on the same UART. The LED flashes N times then pauses —
+# a human watches the pattern and reports N to determine where execution
+# reached / stopped.
+debug-checkpoint = []
 heltec_v3 = [
   "embassy",
   "dep:esp-backtrace",

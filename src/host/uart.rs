@@ -67,11 +67,16 @@ pub async fn host_task(
                 }
             }
             Either::Second(response) => {
+                #[cfg(feature = "debug-checkpoint")]
+                crate::debug_blink::set(13);
                 if let Some(frame) =
                     framing::cobs_encode_response(response, &mut write_buf, &mut cobs_encode_buf)
                 {
                     if tx.write_all(frame).await.is_err() {
                         warn!("UART write failed, response dropped");
+                    } else {
+                        #[cfg(feature = "debug-checkpoint")]
+                        crate::debug_blink::set(14);
                     }
                 }
             }

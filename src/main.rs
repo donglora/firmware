@@ -19,6 +19,8 @@
 mod board;
 #[cfg(not(test))]
 mod channel;
+#[cfg(all(not(test), feature = "debug-checkpoint"))]
+mod debug_blink;
 #[cfg(not(test))]
 mod display;
 #[cfg(not(test))]
@@ -97,10 +99,21 @@ async fn run(spawner: Spawner) {
     );
 
     if let Some(dp) = parts.display {
-        #[allow(clippy::unit_arg)] // LedDriver is () for boards without LEDs
-        spawner.spawn(
-            display::display_task(dp, parts.led, &RADIO_EVENTS, &DISPLAY_COMMANDS)
-                .expect("spawn display_task"),
-        );
+        #[cfg(feature = "debug-checkpoint")]
+        {
+            // LED is taken over by the checkpoint blinker; the display
+            // init struct is dropped unused for this debug build.
+            let _ = dp;
+            spawner
+                .spawn(debug_blink::debug_blink_task(parts.led).expect("spawn debug_blink_task"));
+        }
+        #[cfg(not(feature = "debug-checkpoint"))]
+        {
+            #[allow(clippy::unit_arg)] // LedDriver is () for boards without LEDs
+            spawner.spawn(
+                display::display_task(dp, parts.led, &RADIO_EVENTS, &DISPLAY_COMMANDS)
+                    .expect("spawn display_task"),
+            );
+        }
     }
 }

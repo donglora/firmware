@@ -1,10 +1,33 @@
 //! USB CDC-ACM host task: COBS-framed fixed-size LE command/response protocol.
+//!
+//! ```text
+//! Host
+//! ├── Disconnected   (default)   no DTR
+//! └── Connected                  host attached
+//!     entry: wake_display
+//!     exit:  stop_radio, reset_display
+//! ```
+//!
+//! The statechart tracks exactly one thing: DTR. Entry/exit actions
+//! replace the old `was_connected` edge-detector and emit the display
+//! wake / radio-stop / display-reset side-effects that used to be open
+//! coded around the `select3` loop.
+//!
+//! The data plane (COBS decoding, command routing, response encoding)
+//! stays imperative in `protocol_loop` for the same reason the radio's
+//! `rx_once` stayed out of its chart: `read_packet` blocks and can't
+//! live inside a statechart action. Host-contract lifecycle (one
+//! outstanding command, unsolicited `RxPacket`, synchronous local
+//! responses) is deliberately *not* modeled — any finer chart here
+//! would desynchronise from the concurrent `select3` reality and lie
+//! about what the firmware is actually doing.
 
 use defmt::warn;
 use embassy_executor::task;
 use embassy_futures::join::join;
 use embassy_usb::class::cdc_acm::{CdcAcmClass, Receiver, Sender, State};
 use embassy_usb::Builder;
+use hsmc::{statechart, Duration};
 use static_cell::StaticCell;
 
 use super::framing::{self, CobsDecoder, MAX_FRAME};
@@ -12,6 +35,77 @@ use crate::channel::{CommandChannel, DisplayCommand, DisplayCommandChannel, Resp
 use crate::protocol::Command;
 
 const MAX_PACKET: usize = 64;
+
+/// Internal events driving `Host` state transitions.
+#[derive(Debug, Clone)]
+pub enum HostInput {
+    /// DTR rose: host opened the serial port.
+    DtrRaised,
+    /// DTR fell: host closed or disconnected.
+    DtrDropped,
+}
+
+/// Machine context — channel handles the actions need to broadcast
+/// DTR-edge side-effects. The COBS decoder, read/write scratch, and
+/// USB endpoints stay local to `protocol_loop` because their async
+/// operations can't live inside statechart actions.
+pub struct HostContext {
+    commands: &'static CommandChannel,
+    display_commands: &'static DisplayCommandChannel,
+    has_display: bool,
+}
+
+impl HostContext {
+    async fn wake_display_if_present(&self) {
+        if self.has_display {
+            self.display_commands.send(DisplayCommand::On).await;
+        }
+    }
+
+    async fn reset_display_if_present(&self) {
+        if self.has_display {
+            self.display_commands.send(DisplayCommand::Reset).await;
+        }
+    }
+
+    fn stop_radio_best_effort(&self) {
+        if self.commands.try_send(Command::StopRx).is_err() {
+            warn!("host DTR-drop: StopRx dropped (command channel full)");
+        }
+    }
+}
+
+statechart! {
+    Host {
+        context: HostContext;
+        events: HostInput;
+        default(Disconnected);
+
+        state Disconnected {
+            on(DtrRaised) => Connected;
+        }
+
+        state Connected {
+            entry: wake_display;
+            exit: stop_radio, reset_display;
+            on(DtrDropped) => Disconnected;
+        }
+    }
+}
+
+impl HostActions for HostActionContext<'_> {
+    async fn wake_display(&mut self) {
+        self.wake_display_if_present().await;
+    }
+
+    async fn stop_radio(&mut self) {
+        self.stop_radio_best_effort();
+    }
+
+    async fn reset_display(&mut self) {
+        self.reset_display_if_present().await;
+    }
+}
 
 #[task]
 pub async fn host_task(
@@ -83,11 +177,18 @@ async fn protocol_loop<'d, D: embassy_usb_driver::Driver<'d>>(
 ) {
     use embassy_futures::select::{select3, Either3};
 
+    let mut machine = Host::new_local(HostContext {
+        commands,
+        display_commands,
+        has_display,
+    });
+    // Enter the default: Disconnected.
+    machine.step(Duration::ZERO).await;
+
     let mut read_buf = [0u8; MAX_PACKET];
     let mut write_buf = [0u8; MAX_FRAME];
     let mut cobs_encode_buf = [0u8; MAX_FRAME];
     let mut decoder = CobsDecoder::new();
-    let mut was_connected = false;
 
     loop {
         match select3(
@@ -116,11 +217,10 @@ async fn protocol_loop<'d, D: embassy_usb_driver::Driver<'d>>(
                 }
             }
             Either3::First(Err(_)) => {
-                // read errored — usually a USB disconnect. Drop the
-                // decoder state and back off briefly so we don't spin at
-                // I/O rate. Crucially: DO NOT `continue` — we need the
-                // DTR check below to run so the display gets its
-                // `CmdReset` and the radio gets its `StopRx`.
+                // Read errored — usually a USB disconnect. Drop decoder
+                // scratch and back off briefly so we don't spin at I/O
+                // rate. Do NOT `continue`: the DTR check below must
+                // still run so the machine's exit action fires.
                 decoder.reset();
                 embassy_time::Timer::after_millis(100).await;
             }
@@ -139,16 +239,27 @@ async fn protocol_loop<'d, D: embassy_usb_driver::Driver<'d>>(
             Either3::Third(()) => {}
         }
 
+        // Edge-detect DTR against the machine's current state. The
+        // machine's entry/exit actions own the side-effects. dispatch()
+        // pushes the event AND drains the internal queue, so
+        // current_state() reflects the post-dispatch state before we
+        // loop back around.
         let connected = receiver.dtr();
-        if was_connected && !connected {
-            let _ = commands.try_send(Command::StopRx);
-            if has_display {
-                display_commands.send(DisplayCommand::Reset).await;
+        let was_connected = matches!(machine.current_state(), HostState::Connected);
+        match (was_connected, connected) {
+            (false, true) => {
+                let _ = machine.dispatch(HostInput::DtrRaised).await;
             }
+            (true, false) => {
+                // Belt-and-braces: reset decoder here too. The error
+                // arm above typically fires on disconnect and already
+                // resets it, but this makes intent explicit and
+                // survives embassy-usb behavior changes where a
+                // disconnect doesn't surface as a read error.
+                decoder.reset();
+                let _ = machine.dispatch(HostInput::DtrDropped).await;
+            }
+            _ => {}
         }
-        if !was_connected && connected && has_display {
-            display_commands.send(DisplayCommand::On).await;
-        }
-        was_connected = connected;
     }
 }
