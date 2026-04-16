@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-04-16
+
+### Added
+
+- BLE soft-mesh multiplexer design document (`BLE_MUX_DESIGN_DOC.md`) —
+  specification for turning a dongle from a 1:1 USB device into a shared
+  near-field radio gateway for multiple BLE-attached phones. Three-phase
+  rollout (v1 MVP, v2 hardening, v3 multi-dongle mesh) with regulatory
+  duty-cycle and TX-access-control enforcement from v1. Targets nRF52840
+  first; ESP32-S3 reserved for v2.
+- `debug-checkpoint` cargo feature with a dedicated `debug_blink` task and
+  a latching atomic checkpoint — LED-pattern diagnostic for UART-only
+  boards where defmt output would corrupt the host protocol. Zero
+  footprint when the feature is off.
+
+### Changed
+
+- Radio task rewritten as an `hsmc` statechart (`Unconfigured` /
+  `Configured.{Idle, StartingRx, Receiving, ResumingRx,
+  Transmitting.{FromIdle, FromRx}}`). The main loop is now a single
+  `machine.run().await`; command reading, packet RX, and TX are
+  state-scoped `during:` activities. Post-TX RX re-arm is modeled as
+  state identity (`TransmittingFromRx` → `ResumingRx`) instead of a
+  `was_receiving` flag.
+- Display task rewritten as an `hsmc` statechart (`Off` /
+  `On.{Splash.{LearnMore, Info}, Dashboard.{Listening, Transmitting}}`).
+  The 5 s splash alternation and 1 s sparkline tick use `on(after …)` /
+  `on(every …)` transitions — no external timer task.
+- USB host task now carries a small `hsmc` statechart (`Disconnected` /
+  `Connected`) whose entry/exit actions handle display wake, radio
+  `StopRx`, and display reset — replacing the open-coded `was_connected`
+  edge detector.
+- Radio → Display channel switched from a `RadioStatus` watch to a typed
+  `RadioEvent` queue. The radio emits discrete `EnteredRx` / `EnteredTx`
+  / `Idle` / `PacketRx` / `PacketTx` / `ConfigChanged` events; downstream
+  consumers observe transitions directly rather than diffing snapshots.
+- Wire protocol types and COBS framing moved out of firmware into the
+  shared `donglora-protocol` crate (path dep on `../protocol`). Firmware
+  `src/protocol.rs` is now a re-export shim preserving every call site;
+  `src/host/framing.rs` keeps only the embassy-specific `route_command`.
+
+### Fixed
+
+- USB disconnect recovery: on a read error the DTR-edge-detect branch
+  now runs unconditionally (was early-continuing in some paths, starving
+  the display-reset / radio-stop handoff).
+
 ## [0.4.0] - 2026-04-11
 
 ### Added
