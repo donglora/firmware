@@ -1,54 +1,53 @@
-//! USB CDC-ACM host task: COBS-framed fixed-size LE command/response protocol.
+//! USB CDC-ACM host task for DongLoRa Protocol v2.
 //!
 //! ```text
 //! Host
-//! ├── Disconnected   (default)   no DTR
-//! └── Connected                  host attached
-//!     entry: wake_display
-//!     exit:  stop_radio, reset_display
+//! ├── Disconnected   (default)   no DTR, or inactivity timer fired
+//! └── Connected                  host attached, liveness OK
+//!     entry: wake_display, start_liveness_timer
+//!     exit:  reset_radio, reset_display, stop_liveness_timer
 //! ```
 //!
-//! The statechart tracks exactly one thing: DTR. Entry/exit actions
-//! replace the old `was_connected` edge-detector and emit the display
-//! wake / radio-stop / display-reset side-effects that used to be open
-//! coded around the `select3` loop.
+//! The statechart tracks one state bit: "is a host present?". DTR drives
+//! connect edges; the 1-second inactivity watchdog (spec §3.4) drives
+//! the disconnect edge when DTR is held high but no bytes arrive.
 //!
-//! The data plane (COBS decoding, command routing, response encoding)
-//! stays imperative in `protocol_loop` for the same reason the radio's
-//! `rx_once` stayed out of its chart: `read_packet` blocks and can't
-//! live inside a statechart action. Host-contract lifecycle (one
-//! outstanding command, unsolicited `RxPacket`, synchronous local
-//! responses) is deliberately *not* modeled — any finer chart here
-//! would desynchronise from the concurrent `select3` reality and lie
-//! about what the firmware is actually doing.
+//! The data plane (frame decode, command dispatch, frame encode) stays
+//! imperative in `protocol_loop` for the same reason the radio's
+//! `rx_once` stayed out of its chart: `read_packet` blocks.
 
 use defmt::warn;
 use embassy_executor::task;
 use embassy_futures::join::join;
+use embassy_time::{Duration, Instant};
 use embassy_usb::class::cdc_acm::{CdcAcmClass, Receiver, Sender, State};
 use embassy_usb::Builder;
-use hsmc::{statechart, Duration};
+use hsmc::{statechart, Duration as HsmcDuration};
 use static_cell::StaticCell;
 
-use super::framing::{self, CobsDecoder, MAX_FRAME};
-use crate::channel::{CommandChannel, DisplayCommand, DisplayCommandChannel, ResponseChannel};
-use crate::protocol::Command;
+use super::framing::{dispatch_frame, emit_async_err, encode_outbound};
+use crate::channel::{
+    CommandChannel, DisplayCommand, DisplayCommandChannel, InboundEvent, OutboundChannel,
+};
+use crate::protocol::{ErrorCode, FrameDecoder, FrameResult, MAX_WIRE_FRAME};
 
-const MAX_PACKET: usize = 64;
+const MAX_USB_PACKET: usize = 64;
 
-/// Internal events driving `Host` state transitions.
+/// Spec §3.4: inactivity timer period. The device must see at least one
+/// frame (good or bad) every 1000 ms or the session is considered lost.
+const INACTIVITY_MS: u64 = 1000;
+
+/// Poll interval for the DTR edge detector / inactivity check.
+const POLL_INTERVAL_MS: u64 = 100;
+
 #[derive(Debug, Clone)]
 pub enum HostInput {
-    /// DTR rose: host opened the serial port.
     DtrRaised,
-    /// DTR fell: host closed or disconnected.
     DtrDropped,
+    /// Host went silent for >1 s; kick the radio back to Unconfigured.
+    InactivityTimeout,
 }
 
-/// Machine context — channel handles the actions need to broadcast
-/// DTR-edge side-effects. The COBS decoder, read/write scratch, and
-/// USB endpoints stay local to `protocol_loop` because their async
-/// operations can't live inside statechart actions.
 pub struct HostContext {
     commands: &'static CommandChannel,
     display_commands: &'static DisplayCommandChannel,
@@ -68,9 +67,9 @@ impl HostContext {
         }
     }
 
-    fn stop_radio_best_effort(&self) {
-        if self.commands.try_send(Command::StopRx).is_err() {
-            warn!("host DTR-drop: StopRx dropped (command channel full)");
+    fn send_radio_reset(&self) {
+        if self.commands.try_send(InboundEvent::Reset).is_err() {
+            warn!("radio Reset inject: command queue full");
         }
     }
 }
@@ -87,8 +86,9 @@ statechart! {
 
         state Connected {
             entry: wake_display;
-            exit: stop_radio, reset_display;
+            exit: reset_radio, reset_display;
             on(DtrDropped) => Disconnected;
+            on(InactivityTimeout) => Disconnected;
         }
     }
 }
@@ -98,8 +98,8 @@ impl HostActions for HostActionContext<'_> {
         self.wake_display_if_present().await;
     }
 
-    async fn stop_radio(&mut self) {
-        self.stop_radio_best_effort();
+    async fn reset_radio(&mut self) {
+        self.send_radio_reset();
     }
 
     async fn reset_display(&mut self) {
@@ -111,7 +111,7 @@ impl HostActions for HostActionContext<'_> {
 pub async fn host_task(
     parts: crate::board::UsbParts,
     commands: &'static CommandChannel,
-    responses: &'static ResponseChannel,
+    outbound: &'static OutboundChannel,
     display_commands: &'static DisplayCommandChannel,
     has_display: bool,
     mac: [u8; 6],
@@ -147,7 +147,7 @@ pub async fn host_task(
 
     let mut builder = Builder::new(parts.driver, config, desc_buf, conf_buf, bos_buf, ctrl_buf);
 
-    let class = CdcAcmClass::new(&mut builder, cdc_state, MAX_PACKET as u16);
+    let class = CdcAcmClass::new(&mut builder, cdc_state, MAX_USB_PACKET as u16);
     let mut usb_dev = builder.build();
     let (sender, receiver) = class.split();
 
@@ -157,10 +157,9 @@ pub async fn host_task(
             sender,
             receiver,
             commands,
-            responses,
+            outbound,
             display_commands,
             has_display,
-            mac,
         ),
     )
     .await;
@@ -170,10 +169,9 @@ async fn protocol_loop<'d, D: embassy_usb_driver::Driver<'d>>(
     mut sender: Sender<'d, D>,
     mut receiver: Receiver<'d, D>,
     commands: &'static CommandChannel,
-    responses: &'static ResponseChannel,
+    outbound: &'static OutboundChannel,
     display_commands: &'static DisplayCommandChannel,
     has_display: bool,
-    mac: [u8; 6],
 ) {
     use embassy_futures::select::{select3, Either3};
 
@@ -182,55 +180,36 @@ async fn protocol_loop<'d, D: embassy_usb_driver::Driver<'d>>(
         display_commands,
         has_display,
     });
-    // Enter the default: Disconnected.
-    machine.step(Duration::ZERO).await;
+    machine.step(HsmcDuration::ZERO).await;
 
-    let mut read_buf = [0u8; MAX_PACKET];
-    let mut write_buf = [0u8; MAX_FRAME];
-    let mut cobs_encode_buf = [0u8; MAX_FRAME];
-    let mut decoder = CobsDecoder::new();
+    let mut read_buf = [0u8; MAX_USB_PACKET];
+    let mut write_buf: [u8; MAX_WIRE_FRAME] = [0u8; MAX_WIRE_FRAME];
+    let mut decoder = FrameDecoder::new();
+
+    let mut last_frame_at = Instant::now();
 
     loop {
         match select3(
             receiver.read_packet(&mut read_buf),
-            responses.receive(),
-            embassy_time::Timer::after_millis(250),
+            outbound.receive(),
+            embassy_time::Timer::after(Duration::from_millis(POLL_INTERVAL_MS)),
         )
         .await
         {
             Either3::First(Ok(0)) => {}
             Either3::First(Ok(n)) => {
-                let mut cmds = heapless::Vec::<_, 4>::new();
-                decoder.feed(&read_buf[..n], |cmd| {
-                    let _ = cmds.push(cmd);
-                });
-                for cmd in cmds {
-                    framing::route_command(
-                        cmd,
-                        commands,
-                        responses,
-                        display_commands,
-                        has_display,
-                        mac,
-                    )
-                    .await;
-                }
+                last_frame_at = Instant::now();
+                dispatch_bytes(&mut decoder, &read_buf[..n], commands, outbound).await;
             }
             Either3::First(Err(_)) => {
-                // Read errored — usually a USB disconnect. Drop decoder
-                // scratch and back off briefly so we don't spin at I/O
-                // rate. Do NOT `continue`: the DTR check below must
-                // still run so the machine's exit action fires.
                 decoder.reset();
                 embassy_time::Timer::after_millis(100).await;
             }
-            Either3::Second(response) => {
-                if let Some(frame) =
-                    framing::cobs_encode_response(response, &mut write_buf, &mut cobs_encode_buf)
-                {
-                    for chunk in frame.chunks(MAX_PACKET) {
+            Either3::Second(frame) => {
+                if let Some(n) = encode_outbound(&frame, &mut write_buf) {
+                    for chunk in write_buf[..n].chunks(MAX_USB_PACKET) {
                         if sender.write_packet(chunk).await.is_err() {
-                            warn!("USB write failed, response dropped");
+                            warn!("USB write failed, frame dropped");
                             break;
                         }
                     }
@@ -239,27 +218,90 @@ async fn protocol_loop<'d, D: embassy_usb_driver::Driver<'d>>(
             Either3::Third(()) => {}
         }
 
-        // Edge-detect DTR against the machine's current state. The
-        // machine's entry/exit actions own the side-effects. dispatch()
-        // pushes the event AND drains the internal queue, so
-        // current_state() reflects the post-dispatch state before we
-        // loop back around.
+        // DTR edge detection — drives Connected / Disconnected transitions.
         let connected = receiver.dtr();
         let was_connected = matches!(machine.current_state(), HostState::Connected);
         match (was_connected, connected) {
             (false, true) => {
                 let _ = machine.dispatch(HostInput::DtrRaised).await;
+                last_frame_at = Instant::now();
             }
             (true, false) => {
-                // Belt-and-braces: reset decoder here too. The error
-                // arm above typically fires on disconnect and already
-                // resets it, but this makes intent explicit and
-                // survives embassy-usb behavior changes where a
-                // disconnect doesn't surface as a read error.
                 decoder.reset();
                 let _ = machine.dispatch(HostInput::DtrDropped).await;
             }
             _ => {}
         }
+
+        // Inactivity watchdog (spec §3.4): while Connected, if no frame
+        // arrived in the last INACTIVITY_MS, drive the session back to
+        // Disconnected.
+        if matches!(machine.current_state(), HostState::Connected)
+            && last_frame_at.elapsed() >= Duration::from_millis(INACTIVITY_MS)
+        {
+            warn!("host inactivity timeout fired");
+            let _ = machine.dispatch(HostInput::InactivityTimeout).await;
+        }
     }
+}
+
+/// Feed raw bytes into the frame decoder. For each complete frame:
+/// - Ok → route into the command channel (or emit sync ERR on parse fail)
+/// - Err(Crc | Cobs | TooShort) → emit async ERR(EFRAME)
+///
+/// Borrow-scoped per the `FrameDecoder::feed` callback contract: the
+/// payload slice is valid only for the duration of the callback.
+async fn dispatch_bytes(
+    decoder: &mut FrameDecoder,
+    bytes: &[u8],
+    commands: &'static CommandChannel,
+    outbound: &'static OutboundChannel,
+) {
+    // `FrameDecoder::feed` hands payloads by reference; we must synchronously
+    // copy any data we need before the callback returns. To avoid fighting
+    // lifetimes we accumulate per-frame work as an enum.
+    let mut work: heapless::Vec<FrameWork, 4> = heapless::Vec::new();
+    decoder.feed(bytes, |res| match res {
+        FrameResult::Ok {
+            type_id,
+            tag,
+            payload,
+        } => {
+            let mut p: heapless::Vec<u8, { crate::protocol::MAX_PAYLOAD_FIELD }> =
+                heapless::Vec::new();
+            let _ = p.extend_from_slice(payload);
+            let _ = work.push(FrameWork::Ok {
+                type_id,
+                tag,
+                payload: p,
+            });
+        }
+        FrameResult::Err(_e) => {
+            let _ = work.push(FrameWork::Frame);
+        }
+    });
+    for w in work {
+        match w {
+            FrameWork::Ok {
+                type_id,
+                tag,
+                payload,
+            } => {
+                dispatch_frame(type_id, tag, &payload, commands, outbound).await;
+            }
+            FrameWork::Frame => {
+                emit_async_err(outbound, ErrorCode::EFrame).await;
+            }
+        }
+    }
+}
+
+#[allow(clippy::large_enum_variant)]
+enum FrameWork {
+    Ok {
+        type_id: u8,
+        tag: u16,
+        payload: heapless::Vec<u8, { crate::protocol::MAX_PAYLOAD_FIELD }>,
+    },
+    Frame,
 }

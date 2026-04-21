@@ -38,7 +38,7 @@ use hsmc::statechart;
 
 use crate::board::{self, Board, DisplayDriver, DisplayParts, LedDriver, LoRaBoard, RgbLed};
 use crate::channel::{DisplayCommand, DisplayCommandChannel, RadioEvent, RadioEventChannel};
-use crate::protocol::RadioConfig;
+use crate::protocol::LoRaConfig;
 
 use render::{BoardInfo, RSSI_HISTORY_LEN};
 
@@ -75,7 +75,7 @@ pub enum DisplayEvent {
     },
     /// A packet was transmitted (data only — does not imply a mode change).
     PacketTx,
-    ConfigChanged(RadioConfig),
+    ConfigChanged(LoRaConfig),
 }
 
 impl From<RadioEvent> for DisplayEvent {
@@ -109,7 +109,7 @@ struct RunState {
     rssi_count: usize,
     current_slot_rssi: i16,
     current_slot_tx: bool,
-    config: Option<RadioConfig>,
+    config: Option<LoRaConfig>,
     rx_count: u32,
     tx_count: u32,
     last_rssi: Option<i16>,
@@ -247,7 +247,7 @@ statechart! {
             // descend_defaults lands us in LearnMore with a fresh 5 s timer.
             on(CmdReset) => reset_run_state, turn_led_off, Splash;
             // Config can arrive before the dashboard is up; cache it anywhere.
-            on(ConfigChanged(cfg: RadioConfig)) => save_new_config;
+            on(ConfigChanged(cfg: LoRaConfig)) => save_new_config;
 
             state Splash {
                 default(LearnMore);
@@ -348,7 +348,7 @@ impl DisplayActions for DisplayActionContext<'_> {
         self.led_blip(32, 0, 0).await;
     }
 
-    async fn save_new_config(&mut self, cfg: RadioConfig) {
+    async fn save_new_config(&mut self, cfg: LoRaConfig) {
         self.run.config = Some(cfg);
     }
 
@@ -440,7 +440,7 @@ mod render {
     use heapless::String;
 
     use super::Badge;
-    use crate::protocol::{Bandwidth, RadioConfig};
+    use crate::protocol::{LoRaBandwidth, LoRaConfig};
 
     pub const RSSI_HISTORY_LEN: usize = 128;
 
@@ -505,7 +505,7 @@ mod render {
     pub fn dashboard(
         target: &mut impl DrawTarget<Color = BinaryColor>,
         badge: Badge,
-        config: Option<RadioConfig>,
+        config: Option<LoRaConfig>,
         rx_count: u32,
         tx_count: u32,
         last_rssi: Option<i16>,
@@ -588,21 +588,33 @@ mod render {
             let freq_mhz = cfg.freq_hz / 1_000_000;
             let freq_khz = (cfg.freq_hz % 1_000_000) / 1_000;
             let bw_str = match cfg.bw {
-                Bandwidth::Khz7 => "7.8",
-                Bandwidth::Khz10 => "10.4",
-                Bandwidth::Khz15 => "15.6",
-                Bandwidth::Khz20 => "20.8",
-                Bandwidth::Khz31 => "31.2",
-                Bandwidth::Khz41 => "41.7",
-                Bandwidth::Khz62 => "62.5",
-                Bandwidth::Khz125 => "125",
-                Bandwidth::Khz250 => "250",
-                Bandwidth::Khz500 => "500",
+                LoRaBandwidth::Khz7 => "7.8",
+                LoRaBandwidth::Khz10 => "10.4",
+                LoRaBandwidth::Khz15 => "15.6",
+                LoRaBandwidth::Khz20 => "20.8",
+                LoRaBandwidth::Khz31 => "31.2",
+                LoRaBandwidth::Khz41 => "41.7",
+                LoRaBandwidth::Khz62 => "62.5",
+                LoRaBandwidth::Khz125 => "125",
+                LoRaBandwidth::Khz250 => "250",
+                LoRaBandwidth::Khz500 => "500",
+                LoRaBandwidth::Khz200 => "200",
+                LoRaBandwidth::Khz400 => "400",
+                LoRaBandwidth::Khz800 => "800",
+                LoRaBandwidth::Khz1600 => "1600",
+            };
+            // Show only the CR denominator; the "4/" numerator is implied for
+            // every LoRa coding rate and just clutters the line.
+            let cr_str = match cfg.cr {
+                crate::protocol::LoRaCodingRate::Cr4_5 => "5",
+                crate::protocol::LoRaCodingRate::Cr4_6 => "6",
+                crate::protocol::LoRaCodingRate::Cr4_7 => "7",
+                crate::protocol::LoRaCodingRate::Cr4_8 => "8",
             };
             let _ = write!(
                 buf,
                 "{}.{:03}/{}/{}/{}",
-                freq_mhz, freq_khz, bw_str, cfg.sf, cfg.cr
+                freq_mhz, freq_khz, bw_str, cfg.sf, cr_str
             );
             Text::with_alignment(
                 &buf,

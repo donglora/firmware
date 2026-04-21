@@ -39,7 +39,9 @@ use embassy_executor::Spawner;
 #[cfg(not(test))]
 use crate::board::LoRaBoard;
 #[cfg(not(test))]
-use crate::channel::{CommandChannel, DisplayCommandChannel, RadioEventChannel, ResponseChannel};
+use crate::channel::{CommandChannel, DisplayCommandChannel, OutboundChannel, RadioEventChannel};
+#[cfg(not(test))]
+use crate::protocol::{cap, Info, MAX_MCU_UID_LEN, MAX_RADIO_UID_LEN};
 
 #[cfg(not(test))]
 cfg_if::cfg_if! {
@@ -55,11 +57,13 @@ cfg_if::cfg_if! {
 #[cfg(not(test))]
 static COMMANDS: CommandChannel = CommandChannel::new();
 #[cfg(not(test))]
-static RESPONSES: ResponseChannel = ResponseChannel::new();
+static OUTBOUND: OutboundChannel = OutboundChannel::new();
 #[cfg(not(test))]
 static RADIO_EVENTS: RadioEventChannel = RadioEventChannel::new();
 #[cfg(not(test))]
 static DISPLAY_COMMANDS: DisplayCommandChannel = DisplayCommandChannel::new();
+#[cfg(not(test))]
+static mut INFO: Option<Info> = None;
 
 #[cfg(not(test))]
 cfg_if::cfg_if! {
@@ -81,8 +85,18 @@ async fn run(spawner: Spawner) {
     let board = <board::Board as LoRaBoard>::init();
     let parts = board.into_parts();
 
+    // Build the GET_INFO struct once at boot. This is the authoritative
+    // snapshot of device capabilities reported over the wire.
+    let info = build_info(parts.mac);
+    // SAFETY: touched only here at boot, before any task is spawned.
+    let info_ref: &'static Info = unsafe {
+        INFO = Some(info);
+        #[allow(static_mut_refs)]
+        INFO.as_ref().expect("INFO just initialized")
+    };
+
     spawner.spawn(
-        radio::radio_task(parts.radio, &COMMANDS, &RESPONSES, &RADIO_EVENTS)
+        radio::radio_task(parts.radio, &COMMANDS, &OUTBOUND, &RADIO_EVENTS, info_ref)
             .expect("spawn radio_task"),
     );
 
@@ -90,13 +104,16 @@ async fn run(spawner: Spawner) {
         host::host_task(
             parts.host,
             &COMMANDS,
-            &RESPONSES,
+            &OUTBOUND,
             &DISPLAY_COMMANDS,
             parts.display.is_some(),
             parts.mac,
         )
         .expect("spawn host_task"),
     );
+
+    // Suppress "assigned but never read" warning on non-USB/UART path.
+    let _ = info_ref;
 
     if let Some(dp) = parts.display {
         #[cfg(feature = "debug-checkpoint")]
@@ -116,4 +133,64 @@ async fn run(spawner: Spawner) {
             );
         }
     }
+}
+
+#[cfg(not(test))]
+fn build_info(mac: [u8; 6]) -> Info {
+    let (fmin, fmax) = <board::Board as LoRaBoard>::freq_range_hz();
+    let chip_id = <board::Board as LoRaBoard>::radio_chip_id();
+    let (tx_min, tx_max) = board::Board::TX_POWER_RANGE;
+
+    let mut mcu_uid = [0u8; MAX_MCU_UID_LEN];
+    mcu_uid[..6].copy_from_slice(&mac);
+
+    Info {
+        proto_major: 1,
+        proto_minor: 0,
+        fw_major: parse_u8_or(env!("CARGO_PKG_VERSION_MAJOR"), 0),
+        fw_minor: parse_u8_or(env!("CARGO_PKG_VERSION_MINOR"), 0),
+        fw_patch: parse_u8_or(env!("CARGO_PKG_VERSION_PATCH"), 0),
+        radio_chip_id: chip_id,
+        capability_bitmap: cap::LORA | cap::CAD_BEFORE_TX,
+        // SX126x supports SF5–SF12 (LLCC68 tops out at SF11 — that board
+        // can override this via a board-level trait method later).
+        supported_sf_bitmap: 0x1FE0,
+        // Sub-GHz BW enum values 0..9. SX128x would flip 10..13; add as
+        // boards come online.
+        supported_bw_bitmap: 0x03FF,
+        max_payload_bytes: crate::protocol::MAX_OTA_PAYLOAD as u16,
+        // Real channel depths from channel.rs.
+        rx_queue_capacity: 32,
+        tx_queue_capacity: 1,
+        freq_min_hz: fmin,
+        freq_max_hz: fmax,
+        tx_power_min_dbm: tx_min,
+        tx_power_max_dbm: tx_max,
+        mcu_uid_len: 6,
+        mcu_uid,
+        radio_uid_len: 0,
+        radio_uid: [0u8; MAX_RADIO_UID_LEN],
+    }
+}
+
+#[cfg(not(test))]
+const fn parse_u8_or(s: &str, default: u8) -> u8 {
+    // CARGO_PKG_VERSION_* strings are short decimal ascii. Parse them at
+    // compile time via a tiny constant function instead of pulling in a
+    // dependency.
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    let mut out: u32 = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b < b'0' || b > b'9' {
+            return default;
+        }
+        out = out * 10 + (b - b'0') as u32;
+        if out > u8::MAX as u32 {
+            return default;
+        }
+        i += 1;
+    }
+    out as u8
 }

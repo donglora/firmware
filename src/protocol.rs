@@ -1,12 +1,16 @@
-//! Wire protocol types.
+//! Wire protocol types for DongLoRa Protocol v2.
 //!
-//! The definitions live in the `donglora-protocol` crate so host-side
-//! Rust projects (client-rs, mux-rs, bridge) can share them with the
-//! firmware without duplicating wire layouts. This module re-exports
-//! them unchanged for existing `crate::protocol::*` call sites.
+//! Wire definitions live in the `donglora-protocol` crate so host-side
+//! Rust projects can share them with the firmware without duplicating
+//! wire layouts. This module re-exports them unchanged so firmware
+//! modules can `use crate::protocol::*;`.
 
 #[allow(unused_imports)]
 pub use donglora_protocol::{
-    Bandwidth, Command, ErrorCode, RadioConfig, Response, MAX_PAYLOAD, PREAMBLE_DEFAULT,
-    RADIO_CONFIG_SIZE, TX_POWER_MAX,
+    cap, commands, encode_frame, events, Command, CommandParseError, DeviceMessage,
+    DeviceMessageParseError, ErrorCode, FlrcConfig, FrameDecoder, FrameEncodeError, FrameResult,
+    FskConfig, Info, InfoParseError, LoRaBandwidth, LoRaCodingRate, LoRaConfig, LoRaHeaderMode,
+    LrFhssConfig, Modulation, ModulationId, OkPayload, Owner, RadioChipId, RxOrigin, RxPayload,
+    SetConfigResult, SetConfigResultCode, TxDonePayload, TxFlags, TxResult, MAX_MCU_UID_LEN,
+    MAX_OK_PAYLOAD, MAX_OTA_PAYLOAD, MAX_PAYLOAD_FIELD, MAX_RADIO_UID_LEN, MAX_WIRE_FRAME,
 };

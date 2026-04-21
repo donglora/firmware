@@ -47,6 +47,21 @@ pub trait LoRaBoard: Sized {
     /// Read the board's unique hardware address (MAC, device ID, etc.).
     fn mac_address() -> [u8; 6];
 
+    /// Radio chip identifier reported in `GET_INFO`. Defaults to SX1262
+    /// (`0x0002`), matching every currently-supported board. Override for
+    /// boards that carry a different chip (LLCC68, SX1261, LR11xx, …).
+    fn radio_chip_id() -> u16 {
+        // SX1262 — see PROTOCOL.md §8.
+        0x0002
+    }
+
+    /// (freq_min_hz, freq_max_hz) — the RF front-end's effective tuning
+    /// window on this specific board. Reported in `GET_INFO`. Defaults
+    /// to the SX1262's nominal 150–960 MHz range.
+    fn freq_range_hz() -> (u32, u32) {
+        (150_000_000, 960_000_000)
+    }
+
     /// Decompose initialized board into peripheral bundles for each task.
     fn into_parts(
         self,

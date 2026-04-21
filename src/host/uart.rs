@@ -1,85 +1,141 @@
-//! UART host task: COBS-framed fixed-size LE command/response protocol.
+//! UART host task for DongLoRa Protocol v2.
 //!
-//! Used for boards with USB-UART bridge chips (e.g. CP2102 on Heltec V3).
+//! UART has no DTR line, so we assume a host is always present and
+//! rely entirely on the spec §3.4 inactivity watchdog (1 s of silence
+//! → Disconnected → drop radio to Unconfigured).
 
 use defmt::warn;
 use embassy_executor::task;
+use embassy_time::{Duration, Instant};
 use embedded_io_async::Write;
 
-use super::framing::{self, CobsDecoder, MAX_FRAME};
-use crate::channel::{CommandChannel, DisplayCommand, DisplayCommandChannel, ResponseChannel};
+use super::framing::{dispatch_frame, emit_async_err, encode_outbound};
+use crate::channel::{
+    CommandChannel, DisplayCommand, DisplayCommandChannel, InboundEvent, OutboundChannel,
+};
+use crate::protocol::{ErrorCode, FrameDecoder, FrameResult, MAX_PAYLOAD_FIELD, MAX_WIRE_FRAME};
+
+const READ_BUF: usize = 64;
+const INACTIVITY_MS: u64 = 1000;
 
 #[task]
 pub async fn host_task(
     parts: crate::board::UartParts,
     commands: &'static CommandChannel,
-    responses: &'static ResponseChannel,
+    outbound: &'static OutboundChannel,
     display_commands: &'static DisplayCommandChannel,
     has_display: bool,
-    mac: [u8; 6],
+    _mac: [u8; 6],
 ) {
     let (mut rx, mut tx) = parts.driver.split();
 
-    // UART has no DTR — assume a host is always present.
+    // UART has no DTR — wake display immediately and assume a host.
     if has_display {
         display_commands.send(DisplayCommand::On).await;
     }
 
-    let mut read_buf = [0u8; 64];
-    let mut write_buf = [0u8; MAX_FRAME];
-    let mut cobs_encode_buf = [0u8; MAX_FRAME];
-    let mut decoder = CobsDecoder::new();
+    let mut read_buf = [0u8; READ_BUF];
+    let mut write_buf: [u8; MAX_WIRE_FRAME] = [0u8; MAX_WIRE_FRAME];
+    let mut decoder = FrameDecoder::new();
+    let mut last_frame_at = Instant::now();
+    let mut connected = true;
 
     loop {
-        use embassy_futures::select::{select, Either};
+        use embassy_futures::select::{select3, Either3};
 
-        match select(
+        match select3(
             embedded_io_async::Read::read(&mut rx, &mut read_buf),
-            responses.receive(),
+            outbound.receive(),
+            embassy_time::Timer::after(Duration::from_millis(100)),
         )
         .await
         {
-            Either::First(result) => {
-                let n = match result {
-                    Ok(0) => continue,
-                    Ok(n) => n,
-                    Err(_) => {
-                        decoder.reset();
-                        embassy_time::Timer::after_millis(100).await;
-                        continue;
+            Either3::First(result) => match result {
+                Ok(0) => continue,
+                Ok(n) => {
+                    last_frame_at = Instant::now();
+                    if !connected {
+                        if has_display {
+                            let _ = display_commands.try_send(DisplayCommand::On);
+                        }
+                        connected = true;
                     }
-                };
-
-                let mut cmds = heapless::Vec::<_, 4>::new();
-                decoder.feed(&read_buf[..n], |cmd| {
-                    let _ = cmds.push(cmd);
-                });
-                for cmd in cmds {
-                    framing::route_command(
-                        cmd,
-                        commands,
-                        responses,
-                        display_commands,
-                        has_display,
-                        mac,
-                    )
-                    .await;
+                    dispatch_bytes(&mut decoder, &read_buf[..n], commands, outbound).await;
+                }
+                Err(_) => {
+                    decoder.reset();
+                    embassy_time::Timer::after_millis(100).await;
+                }
+            },
+            Either3::Second(frame) => {
+                if let Some(n) = encode_outbound(&frame, &mut write_buf) {
+                    if tx.write_all(&write_buf[..n]).await.is_err() {
+                        warn!("UART write failed, frame dropped");
+                    }
                 }
             }
-            Either::Second(response) => {
-                #[cfg(feature = "debug-checkpoint")]
-                crate::debug_blink::set(13);
-                if let Some(frame) =
-                    framing::cobs_encode_response(response, &mut write_buf, &mut cobs_encode_buf)
-                {
-                    if tx.write_all(frame).await.is_err() {
-                        warn!("UART write failed, response dropped");
-                    } else {
-                        #[cfg(feature = "debug-checkpoint")]
-                        crate::debug_blink::set(14);
-                    }
-                }
+            Either3::Third(()) => {}
+        }
+
+        // Inactivity watchdog.
+        if connected && last_frame_at.elapsed() >= Duration::from_millis(INACTIVITY_MS) {
+            warn!("UART host inactivity timeout fired");
+            let _ = commands.try_send(InboundEvent::Reset);
+            if has_display {
+                let _ = display_commands.try_send(DisplayCommand::Reset);
+            }
+            connected = false;
+        }
+    }
+}
+
+async fn dispatch_bytes(
+    decoder: &mut FrameDecoder,
+    bytes: &[u8],
+    commands: &'static CommandChannel,
+    outbound: &'static OutboundChannel,
+) {
+    let mut work: heapless::Vec<FrameWork, 4> = heapless::Vec::new();
+    decoder.feed(bytes, |res| match res {
+        FrameResult::Ok {
+            type_id,
+            tag,
+            payload,
+        } => {
+            let mut p: heapless::Vec<u8, MAX_PAYLOAD_FIELD> = heapless::Vec::new();
+            let _ = p.extend_from_slice(payload);
+            let _ = work.push(FrameWork::Ok {
+                type_id,
+                tag,
+                payload: p,
+            });
+        }
+        FrameResult::Err(_) => {
+            let _ = work.push(FrameWork::Frame);
+        }
+    });
+    for w in work {
+        match w {
+            FrameWork::Ok {
+                type_id,
+                tag,
+                payload,
+            } => {
+                dispatch_frame(type_id, tag, &payload, commands, outbound).await;
+            }
+            FrameWork::Frame => {
+                emit_async_err(outbound, ErrorCode::EFrame).await;
             }
         }
     }
+}
+
+#[allow(clippy::large_enum_variant)]
+enum FrameWork {
+    Ok {
+        type_id: u8,
+        tag: u16,
+        payload: heapless::Vec<u8, MAX_PAYLOAD_FIELD>,
+    },
+    Frame,
 }
