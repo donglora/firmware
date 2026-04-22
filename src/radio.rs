@@ -170,10 +170,11 @@ statechart! {
         state Configured {
             on(CmdSetConfig(m: Modulation)) => apply_set_config;
             on(ConfigFailedRadio) => Unconfigured;
-            // Re-configure from any substate (Receiving, Transmitting, …)
-            // drops back to Idle. Spec §3.5: "Any continuous RX is
-            // stopped. RX ring is cleared." Only successful applies
-            // emit ConfigApplied, so validation failures keep state.
+            // Default post-reconfigure landing is Idle. The RX ring is
+            // always cleared as part of apply_set_config. Receiving
+            // overrides this handler to auto-resume RX with the new
+            // parameters (spec §3.5) so callers do not need to re-issue
+            // RX_START after SET_CONFIG.
             on(ConfigApplied) => Idle;
             default(Idle);
 
@@ -202,6 +203,13 @@ statechart! {
                 on(CmdRxStop) => stop_rx_hw, respond_ok;
                 on(CmdRxStop) => Idle;
                 on(CmdTx) => TransmittingFromRx;
+                // Spec §3.5: a SET_CONFIG issued while receiving clears
+                // the RX ring (already handled by apply_set_config) but
+                // auto-rearms RX with the new parameters — the caller
+                // does not need to send a fresh RX_START. Override the
+                // parent's `on(ConfigApplied) => Idle` by landing in
+                // ResumingRx, whose entry kicks the chip back into RX.
+                on(ConfigApplied) => ResumingRx;
             }
 
             state ResumingRx {
