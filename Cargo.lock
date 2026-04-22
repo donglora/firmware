@@ -486,7 +486,7 @@ dependencies = [
 
 [[package]]
 name = "donglora"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "cfg-if",
  "cortex-m",
@@ -527,9 +527,9 @@ dependencies = [
 
 [[package]]
 name = "donglora-protocol"
-version = "1.0.0"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c8f2743ac7668845500e3686890917cdf5b0a09d17ec099bde2db4d3fae2a4a4"
+checksum = "6bae9e9e5a8cebc6b4167f9ef696b61ce25b94c6d8283dbe1b2e97075a481b9d"
 dependencies = [
  "defmt 1.0.1",
  "heapless 0.9.2",

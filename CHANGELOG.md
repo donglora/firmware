@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-04-22
+
+Small but high-value behavior change: `SET_CONFIG` issued while the
+radio is in continuous RX no longer drops the radio (and the OLED)
+back to idle. The radio now auto-re-arms RX with the new modulation
+once reconfiguration completes, matching DongLoRa Protocol 1.1's
+§3.5 / §6.3 amendments.
+
+### Changed
+
+- `src/radio.rs`: inside `state Receiving`, add `on(ConfigApplied)
+  => ResumingRx` to shadow the parent `Configured` state's
+  `on(ConfigApplied) => Idle` handler. The reconfigure path now
+  runs `apply_set_config` → `ConfigApplied` → `ResumingRx.entry:
+  try_start_rx_hw` → `StartRxOk` → `Receiving` without ever
+  entering `Idle`.
+- The OLED's `Dashboard → Splash` transition was previously driven
+  by `RadioEvent::Idle` firing on `Configured.Idle.entry`. That
+  event no longer fires during a SET_CONFIG-from-Receiving
+  sequence, so the display stays on Dashboard.
+
+### Dependencies
+
+- `donglora-protocol` bumped to `1.1.0` (spec-only change; matches
+  the new normative text the firmware now implements).
+
+### Use-case unlock
+
+- Scanner / time-division / dynamic-modulation workflows that
+  rotate LoRa parameters mid-RX no longer need to re-issue
+  `RX_START` after every `SET_CONFIG`. One call, radio continues
+  to receive.
+
 ## [1.0.0] - 2026-04-22
 
 The 1.0 release. Firmware now speaks DongLoRa Protocol v2 end to end,
