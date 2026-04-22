@@ -3,13 +3,14 @@ members = ["."]
 
 [package]
 name = "donglora"
-version = "0.5.0"
+version = "1.0.0"
 edition = "2021"
 build = "build.rs"
 authors = ["Stephen Waits <steve@waits.net>"]
 license = "MIT"
 description = "Transparent LoRa radio over USB — plug in a board, talk LoRa from your host"
-repository = "https://github.com/swaits/donglora"
+repository = "https://github.com/donglora/firmware"
+homepage = "https://github.com/donglora/firmware"
 keywords = ["lora", "radio", "embedded", "usb", "firmware"]
 categories = ["embedded", "hardware-support", "no-std"]
 
@@ -29,8 +30,8 @@ embassy-usb = { version = "0.6", features = ["defmt"] }
 embassy-usb-driver = "0.2"
 ucobs = { version = "0.3", features = ["legacy-msrv"] }
 heapless = "0.9"
-donglora-protocol = { path = "../protocol" }
-hsmc = { path = "../../hsmc/hsmc", default-features = false, features = ["embassy"] }
+donglora-protocol = "1.0.0"
+hsmc = { version = "0.1.0", default-features = false, features = ["embassy"] }
 lora-phy = "3.0"
 portable-atomic = { version = "1", optional = true, default-features = false, features = ["critical-section"] }
 static_cell = "2.1"

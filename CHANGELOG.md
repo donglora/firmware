@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-04-22
+
+The 1.0 release. Firmware now speaks DongLoRa Protocol v2 end to end,
+depends on the freshly-published `donglora-protocol` 1.0.0 and `hsmc`
+0.1.0 from crates.io, and ships GitHub Release binaries for every
+supported board.
+
+### Breaking
+
+- **DongLoRa Protocol v2 wire format** (wire-incompatible with 0.x
+  clients and firmware). Every `type_id`, tag-correlation rule, and
+  field layout follows `PROTOCOL.md` v1.0.
+- **Host framing replaced.** `src/host/framing.rs` now drives a
+  streaming `FrameDecoder` from `donglora-protocol` and emits
+  `(type_id, tag, payload)` frames; the 0.x COBS-per-response shim is
+  gone.
+- **Radio task reshape.** `src/radio.rs` emits v2 `TX_DONE` /
+  `SetConfigResult` / `RxPayload` / `RxOrigin` shapes directly; no 0.x
+  translation layer remains.
+
+### Changed
+
+- `hsmc` switched from path-dep on the local workspace to
+  `version = "0.1.0"` from crates.io.
+- `donglora-protocol` switched from path-dep on `../protocol` to
+  `version = "1.0.0"` from crates.io; firmware builds are now
+  reproducible from a clean checkout with no sibling repo required.
+- `PROTOCOL.md` updated to the DongLoRa Protocol v2 normative spec,
+  kept byte-for-byte in sync with the `donglora-protocol` crate's
+  copy.
+
+### Infrastructure
+
+- Cargo.toml `repository` + `homepage` now point at the canonical
+  `https://github.com/donglora/firmware` (the `swaits/donglora`
+  repo is archived).
+
 ## [0.5.0] - 2026-04-16
 
 ### Added
