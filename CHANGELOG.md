@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-04-23
+
 ### Fixed
 
 - **Radio no longer drops to Idle mid-RX-session on transient failures.**
