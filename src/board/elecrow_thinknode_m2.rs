@@ -1,8 +1,8 @@
 //! ELECROW ThinkNode-M2 — ESP32-S3 Meshtastic handset with SH1106 OLED.
 //!
 //! Tamagotchi-form-factor handheld: ESP32-S3-WROOM-1-N4 + SX1262 + 1.3" SH1106
-//! OLED + CP2102 UART bridge + 1000 mAh Li-Po. Sold pre-loaded with Meshtastic;
-//! this firmware turns it into a DongLoRa radio bridge.
+//! OLED + WCH CH340K UART bridge + 1000 mAh Li-Po. Sold pre-loaded with
+//! Meshtastic; this firmware turns it into a DongLoRa radio bridge.
 //!
 //! Pin map (verified from Meshtastic's variants/esp32s3/ELECROW-ThinkNode-M2
 //! and PR meshtastic/firmware#6354):
@@ -11,7 +11,7 @@
 //!   LoRa pwr: GPIO48 (must be HIGH before any SPI traffic)
 //!   OLED:     I2C0 SDA=16, SCL=15, SH1106 @ 0x3C
 //!   VEXT:     GPIO46 (active HIGH — gates OLED supply)
-//!   UART:     TX=43, RX=44 via CP2102 bridge
+//!   UART:     TX=43, RX=44 via CH340K bridge (USB 1a86:7522)
 //!   LED:      GPIO6 (active HIGH indicator)
 //!
 //! Notable differences from the Heltec ESP32-S3 boards:
