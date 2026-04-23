@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-04-23
+
 ### Added
 
 - LilyGo T-Beam S3 Supreme board support (ESP32-S3 + SX1262 + SH1106
