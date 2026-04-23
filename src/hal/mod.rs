@@ -7,7 +7,8 @@
     feature = "heltec_v3",
     feature = "heltec_v3_uart",
     feature = "heltec_v4",
-    feature = "elecrow_thinknode_m2"
+    feature = "elecrow_thinknode_m2",
+    feature = "lilygo_tbeam_supreme"
 ))]
 pub mod esp32s3;
 

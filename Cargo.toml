@@ -132,6 +132,13 @@ elecrow_thinknode_m2 = [
   "dep:esp-println",
   "dep:esp-rtos",
 ]
+lilygo_tbeam_supreme = [
+  "embassy",
+  "dep:esp-backtrace",
+  "dep:esp-hal",
+  "dep:esp-println",
+  "dep:esp-rtos",
+]
 rak_wisblock_4631 = [
   "embassy",
   "dep:cortex-m",

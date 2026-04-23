@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- LilyGo T-Beam S3 Supreme board support (ESP32-S3 + SX1262 + SH1106
+  OLED + AXP2101 PMIC, native USB-C).
+  - Pin map verified against MeshCore's
+    `variants/lilygo_tbeam_supreme_SX1262`.
+  - New `src/driver/axp.rs` module with an AXP2101 init sequence
+    (ALDO3 = 3.3 V LoRa, ALDO1 = 3.3 V OLED). The PMIC gates LoRa and
+    display power — without it the SX1262 never responds on SPI.
+  - PMIC lives on a dedicated I²C1 bus (SDA=42, SCL=41), separate
+    from the SH1106 on I²C0 (SDA=17, SCL=18). I²C1 is used blocking
+    for a one-shot init and then dropped.
+  - TCXO driven at 1.6 V via DIO3 (MeshCore uses the same).
+
 ## [1.2.1] - 2026-04-23
 
 ### Fixed

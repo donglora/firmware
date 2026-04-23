@@ -1,11 +1,19 @@
-#[cfg(any(feature = "wio_tracker_l1", feature = "elecrow_thinknode_m2"))]
+#[cfg(any(
+    feature = "wio_tracker_l1",
+    feature = "elecrow_thinknode_m2",
+    feature = "lilygo_tbeam_supreme"
+))]
 pub mod sh1106;
+
+#[cfg(feature = "lilygo_tbeam_supreme")]
+pub mod axp;
 
 #[cfg(any(
     feature = "heltec_v3",
     feature = "heltec_v3_uart",
     feature = "heltec_v4",
     feature = "elecrow_thinknode_m2",
+    feature = "lilygo_tbeam_supreme",
     feature = "wio_tracker_l1",
     feature = "waveshare_rp2040_lora"
 ))]
@@ -51,7 +59,11 @@ where
     }
 }
 
-#[cfg(any(feature = "wio_tracker_l1", feature = "elecrow_thinknode_m2"))]
+#[cfg(any(
+    feature = "wio_tracker_l1",
+    feature = "elecrow_thinknode_m2",
+    feature = "lilygo_tbeam_supreme"
+))]
 impl<I> DisplayBrightness for sh1106::Sh1106<I>
 where
     I: embedded_hal_async::i2c::I2c,
