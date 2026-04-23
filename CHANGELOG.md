@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-04-22
+
 ### Added
 
 - **OLED auto-dim after inactivity.** The display is bright on any

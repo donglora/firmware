@@ -3,7 +3,7 @@ members = ["."]
 
 [package]
 name = "donglora"
-version = "1.1.0"
+version = "1.2.0"
 edition = "2021"
 build = "build.rs"
 authors = ["Stephen Waits <steve@waits.net>"]
@@ -30,7 +30,7 @@ embassy-usb = { version = "0.6", features = ["defmt"] }
 embassy-usb-driver = "0.2"
 ucobs = { version = "0.3", features = ["legacy-msrv"] }
 heapless = "0.9"
-donglora-protocol = "1.1.0"
+donglora-protocol = "1"
 hsmc = { version = "0.2", default-features = false, features = ["embassy"] }
 lora-phy = "3.0"
 portable-atomic = { version = "1", optional = true, default-features = false, features = ["critical-section"] }
