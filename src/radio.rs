@@ -102,7 +102,25 @@ pub enum RadioInput {
     },
     ChannelBusy,
     TransmitFailed,
+
+    /// Internal: emitted by `bump_resume_retries` when another
+    /// `try_start_rx_hw` attempt is allowed. Drives a self-transition on
+    /// `ResumingRx` so the entry action runs again after a short backoff.
+    ResumeRxRetry,
+    /// Internal: emitted by `bump_resume_retries` after
+    /// `MAX_RESUME_RETRIES` attempts have failed — the chip is genuinely
+    /// wedged; fall through to `Idle` so the host can reconfigure.
+    ResumeRxExhausted,
 }
+
+/// How many back-to-back `try_start_rx_hw` failures to tolerate in
+/// `ResumingRx` before giving up and parking in `Idle`. 5 × 25 ms ≈
+/// 125 ms worst-case resume window, enough to ride out SX1262
+/// post-TX timing flukes without pegging the CPU on a dead chip.
+const MAX_RESUME_RETRIES: u8 = 5;
+
+/// Backoff between `ResumingRx` retry attempts.
+const RESUME_RX_RETRY_BACKOFF_MS: u64 = 25;
 
 // ── Context ─────────────────────────────────────────────────────────
 
@@ -130,6 +148,10 @@ pub struct RadioContext {
     /// Tag of a pending `RX_START`, pulled by `respond_ok_start_rx` /
     /// `respond_err_start_rx` once the chip reports back.
     pub pending_rx_start_tag: Option<u16>,
+    /// Number of consecutive `try_start_rx_hw` failures while in
+    /// `ResumingRx`. Reset on any `StartRxOk`. See `MAX_RESUME_RETRIES`
+    /// for the limit before falling through to `Idle`.
+    pub resume_retries: u8,
 }
 
 impl RadioContext {
@@ -199,7 +221,12 @@ statechart! {
                 during: next_packet(lora, rx_buf, config);
                 on(CmdRxStart) => respond_ok;
                 on(PacketReceived(rx: RxPayload)) => record_packet;
-                on(RxFailed) => announce_rx_failed, Idle;
+                // Transient driver error during `next_packet` — re-arm
+                // the chip via ResumingRx rather than parking in Idle
+                // (which would bounce the OLED and leave the radio
+                // waiting for a client-initiated RX_START that will
+                // never come because clients already think RX is up).
+                on(RxFailed) => ResumingRx;
                 on(CmdRxStop) => stop_rx_hw, respond_ok;
                 on(CmdRxStop) => Idle;
                 on(CmdTx) => TransmittingFromRx;
@@ -212,10 +239,18 @@ statechart! {
                 on(ConfigApplied) => ResumingRx;
             }
 
+            // Bounded-retry RX re-arm. Entered after every TX while
+            // already receiving, on RX driver errors, and on mid-session
+            // SET_CONFIG. If `try_start_rx_hw` succeeds we land cleanly
+            // in Receiving; if it fails we back off and retry, only
+            // conceding to Idle after MAX_RESUME_RETRIES attempts (chip
+            // is genuinely wedged at that point).
             state ResumingRx {
                 entry: try_start_rx_hw;
-                on(StartRxOk) => Receiving;
-                on(StartRxFailed) => Idle;
+                on(StartRxOk) => reset_resume_retries, Receiving;
+                on(StartRxFailed) => bump_resume_retries;
+                on(ResumeRxRetry) => ResumingRx;
+                on(ResumeRxExhausted) => Idle;
             }
 
             state Transmitting {
@@ -235,8 +270,12 @@ statechart! {
                     during: perform_tx(lora, pending_tx);
                     on(TransmitDone { airtime_us: u32 }) => respond_tx_done;
                     on(TransmitDone) => ResumingRx;
+                    // Even on failure, we were receiving before the TX —
+                    // return to RX (the client still gets a TX_FAILED
+                    // reply via respond_tx_failed). Dropping to Idle here
+                    // would break the "RX session stays up" invariant.
                     on(ChannelBusy) => respond_tx_channel_busy, ResumingRx;
-                    on(TransmitFailed) => respond_tx_failed, Idle;
+                    on(TransmitFailed) => respond_tx_failed, ResumingRx;
                 }
             }
         }
@@ -465,6 +504,28 @@ impl RadioActions for RadioActionContext<'_> {
         }
     }
 
+    async fn reset_resume_retries(&mut self) {
+        self.resume_retries = 0;
+    }
+
+    async fn bump_resume_retries(&mut self) {
+        self.resume_retries = self.resume_retries.saturating_add(1);
+        if self.resume_retries >= MAX_RESUME_RETRIES {
+            warn!(
+                "ResumingRx: {} failed attempts, giving up to Idle",
+                self.resume_retries
+            );
+            self.resume_retries = 0;
+            let _ = self.emit(RadioInput::ResumeRxExhausted);
+            return;
+        }
+        // Short backoff before the next `try_start_rx_hw` cycle. The
+        // self-transition on ResumingRx (driven by ResumeRxRetry) will
+        // re-run the entry action.
+        embassy_time::Timer::after_millis(RESUME_RX_RETRY_BACKOFF_MS).await;
+        let _ = self.emit(RadioInput::ResumeRxRetry);
+    }
+
     async fn respond_ok(&mut self) {
         let tag = self.incoming_tag;
         self.send(tag, DeviceMessage::Ok(OkPayload::Empty)).await;
@@ -528,10 +589,6 @@ impl RadioActions for RadioActionContext<'_> {
 
     async fn announce_packet_tx(&mut self) {
         self.announce(RadioEvent::PacketTx);
-    }
-
-    async fn announce_rx_failed(&mut self) {
-        self.announce(RadioEvent::Idle);
     }
 
     // ── Packet bookkeeping ────────────────────────────────────────────
@@ -748,6 +805,7 @@ pub async fn radio_task(
         incoming_tag: 0,
         last_tx_tag: None,
         pending_rx_start_tag: None,
+        resume_retries: 0,
     };
 
     static RADIO_INTERNAL_CH: embassy_sync::channel::Channel<

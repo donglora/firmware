@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Radio no longer drops to Idle mid-RX-session on transient failures.**
+  Extends the v1.1.0 invariant ("`SET_CONFIG` during RX auto-re-arms")
+  to all failure paths that can occur while a client has RX active:
+  - `Receiving.on(RxFailed) => Idle` now transitions to `ResumingRx`
+    instead of `Idle`. A transient `next_packet` error re-arms the chip
+    rather than ending the RX session.
+  - `TransmittingFromRx.on(TransmitFailed) => Idle` now transitions to
+    `ResumingRx`. TX failure during an active RX session returns
+    `TX_FAILED` to the caller and resumes RX, matching the shape of the
+    adjacent `ChannelBusy` handler.
+  - `ResumingRx.on(StartRxFailed) => Idle` is now a bounded retry
+    (5 × 25 ms backoff via a new `bump_resume_retries` action and a
+    `ResumeRxRetry` / `ResumeRxExhausted` pair of internal events).
+    The chip only lands in `Idle` after exhausting the retry budget —
+    which means it's genuinely wedged and needs reconfiguring.
+
+  Visible effect: the OLED dashboard no longer bounces to Splash when
+  `ai-bot` (or any other client that TXes while RX is running) sends a
+  packet. Previously any of the three transitions above would fire
+  `RadioEvent::Idle`, which the display uses as its `Dashboard → Splash`
+  trigger; the radio would land in `Idle` with no client aware enough
+  to re-send `RX_START`, stranding the dashboard until the session was
+  manually torn down and restarted.
+
+- Removed `announce_rx_failed` helper action: its only purpose was
+  emitting `RadioEvent::Idle` on the now-deleted `Receiving.on(RxFailed)
+  => Idle` edge. No replacement needed — `ResumingRx` handles recovery
+  silently.
+
 ## [1.2.0] - 2026-04-22
 
 ### Added
