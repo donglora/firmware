@@ -13,7 +13,8 @@
 //!   LoRa ctl:  RESET=23, DIO0=26 (primary IRQ — SX127x has no BUSY)
 //!   OLED I²C:  SDA=21, SCL=22, SSD1306 @ 0x3C (shared with AXP192 @ 0x34)
 //!   UART host: TX=1, RX=3 via CP2102 bridge (USB 10c4:ea60)
-//!   LED:       GPIO4 (active HIGH — reuses MeshCore's P_LORA_TX_LED)
+//!   LED:       GPIO4 (active LOW — red LED under the OLED, wrapped in
+//!              InvertedPin so SimpleLed sees normal polarity)
 //!
 //! GPS / battery / IMU / PCF8563 RTC are populated on the board but unused
 //! by this firmware.
@@ -24,6 +25,7 @@ use esp_hal::i2c::master::{Config as I2cConfig, I2c};
 use super::esp32;
 use super::traits::{BoardParts, LoRaBoard};
 use crate::driver::axp;
+use crate::driver::inverted_pin::InvertedPin;
 use crate::driver::simple_led::SimpleLed;
 use crate::hal::esp32 as mcu;
 use crate::protocol::RadioChipId;
@@ -33,7 +35,7 @@ pub use super::esp32::{create_display, DisplayDriver, DisplayParts, RadioDriver,
 // ── Concrete peripheral types ───────────────────────────────────────
 
 pub type UartDriver = esp_hal::uart::Uart<'static, esp_hal::Async>;
-pub type LedDriver = SimpleLed<Output<'static>>;
+pub type LedDriver = SimpleLed<InvertedPin<Output<'static>>>;
 
 // ── Peripheral bundles ──────────────────────────────────────────────
 
@@ -122,9 +124,10 @@ impl LoRaBoard for Board {
             i2c: i2c_blocking.into_async(),
         });
 
-        // TX activity LED on GPIO4 (active HIGH).
-        let led_pin = Output::new(p.GPIO4, Level::Low, OutputConfig::default());
-        let led = SimpleLed(led_pin);
+        // TX activity LED on GPIO4 (active LOW — pin idles HIGH = LED off).
+        // InvertedPin flips set_high/set_low so SimpleLed stays polarity-agnostic.
+        let led_pin = Output::new(p.GPIO4, Level::High, OutputConfig::default());
+        let led = SimpleLed(InvertedPin(led_pin));
 
         BoardParts {
             radio,

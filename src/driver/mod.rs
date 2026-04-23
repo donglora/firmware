@@ -8,6 +8,9 @@ pub mod sh1106;
 #[cfg(any(feature = "lilygo_tbeam_supreme", feature = "lilygo_tbeam"))]
 pub mod axp;
 
+#[cfg(feature = "lilygo_tbeam")]
+pub mod inverted_pin;
+
 #[cfg(any(
     feature = "heltec_v3",
     feature = "heltec_v3_uart",
