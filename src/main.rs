@@ -48,7 +48,7 @@ cfg_if::cfg_if! {
     if #[cfg(any(feature = "rak_wisblock_4631", feature = "wio_tracker_l1", feature = "waveshare_rp2040_lora"))] {
         use defmt_rtt as _;
         use panic_probe as _;
-    } else if #[cfg(any(feature = "heltec_v3", feature = "heltec_v3_uart", feature = "heltec_v4", feature = "elecrow_thinknode_m2", feature = "lilygo_tbeam_supreme"))] {
+    } else if #[cfg(any(feature = "heltec_v3", feature = "heltec_v3_uart", feature = "heltec_v4", feature = "elecrow_thinknode_m2", feature = "lilygo_tbeam_supreme", feature = "lilygo_tbeam"))] {
         use esp_backtrace as _;
         use esp_println as _;
     }
@@ -72,7 +72,7 @@ cfg_if::cfg_if! {
         async fn main(spawner: Spawner) {
             run(spawner).await;
         }
-    } else if #[cfg(any(feature = "heltec_v3", feature = "heltec_v3_uart", feature = "heltec_v4", feature = "elecrow_thinknode_m2", feature = "lilygo_tbeam_supreme"))] {
+    } else if #[cfg(any(feature = "heltec_v3", feature = "heltec_v3_uart", feature = "heltec_v4", feature = "elecrow_thinknode_m2", feature = "lilygo_tbeam_supreme", feature = "lilygo_tbeam"))] {
         #[esp_rtos::main]
         async fn main(spawner: Spawner) {
             run(spawner).await;
@@ -140,6 +140,8 @@ fn build_info(mac: [u8; 6]) -> Info {
     let (fmin, fmax) = <board::Board as LoRaBoard>::freq_range_hz();
     let chip_id = <board::Board as LoRaBoard>::radio_chip_id();
     let (tx_min, tx_max) = board::Board::TX_POWER_RANGE;
+    let supported_sf = <board::Board as LoRaBoard>::supported_sf_bitmap();
+    let supported_bw = <board::Board as LoRaBoard>::supported_bw_bitmap();
 
     let mut mcu_uid = [0u8; MAX_MCU_UID_LEN];
     mcu_uid[..6].copy_from_slice(&mac);
@@ -152,12 +154,8 @@ fn build_info(mac: [u8; 6]) -> Info {
         fw_patch: parse_u8_or(env!("CARGO_PKG_VERSION_PATCH"), 0),
         radio_chip_id: chip_id,
         capability_bitmap: cap::LORA | cap::CAD_BEFORE_TX,
-        // SX126x supports SF5–SF12 (LLCC68 tops out at SF11 — that board
-        // can override this via a board-level trait method later).
-        supported_sf_bitmap: 0x1FE0,
-        // Sub-GHz BW enum values 0..9. SX128x would flip 10..13; add as
-        // boards come online.
-        supported_bw_bitmap: 0x03FF,
+        supported_sf_bitmap: supported_sf,
+        supported_bw_bitmap: supported_bw,
         max_payload_bytes: crate::protocol::MAX_OTA_PAYLOAD as u16,
         // Real channel depths from channel.rs.
         rx_queue_capacity: 32,

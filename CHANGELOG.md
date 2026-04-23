@@ -20,6 +20,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
     from the SH1106 on I²C0 (SDA=17, SCL=18). I²C1 is used blocking
     for a one-shot init and then dropped.
   - TCXO driven at 1.6 V via DIO3 (MeshCore uses the same).
+- LilyGo T-Beam (classic) board support (ESP32 + SX1276 + SSD1306
+  OLED + AXP192 PMIC, CP2102 USB-UART bridge). This is the first
+  board in the firmware on classic ESP32 (non-S3) and the first on
+  the SX127x radio family.
+  - Pin map verified against MeshCore's `variants/lilygo_tbeam_SX1276`.
+  - New `src/hal/esp32.rs` (classic-ESP32 MCU primitives, peripheral
+    DMA via `DMA_SPI2`) and `src/board/esp32.rs` (SX1276 radio helper
+    + SSD1306 display pipe).
+  - AXP192 init added to `src/driver/axp.rs`: DCDC1 = 3.3 V for the
+    OLED, LDO2 = 3.3 V for the SX1276 PA_BOOST rail. Shares the
+    OLED I²C bus (SDA=21, SCL=22); the I²C instance is built in
+    blocking mode for PMIC init and converted to async for the
+    display task.
+  - SX127x support via lora-phy 3's `Sx127x<Sx1276>` +
+    `GenericSx127xInterfaceVariant` (DIO0 as the sole IRQ; no
+    BUSY line on SX127x). XTAL clocked (no TCXO), `tx_boost = true`
+    for the PA_BOOST path.
+  - `LoRaBoard` trait gains `supported_sf_bitmap()` and
+    `supported_bw_bitmap()` methods with SX126x defaults
+    (`0x1FE0`, `0x03FF`). T-Beam classic overrides SF to `0x1FC0`
+    (SF6–SF12) — the SX1276 has no SF5.
+  - `radio_chip_id()` reports `0x0011` (`RadioChipId::Sx1276`) and
+    `freq_range_hz()` widens to 137 MHz–1020 MHz per the SX1276
+    datasheet.
+
+### Changed
+
+- `Cargo.toml`: the `esp32s3` chip feature has been moved out of
+  the `esp-hal` / `esp-rtos` / `esp-backtrace` / `esp-println`
+  dependency lines and into each ESP board's feature list (as
+  `esp-hal/esp32s3`, etc.). This lets `lilygo_tbeam` select the
+  classic `esp32` chip flavour from the same dependency set.
 
 ## [1.2.1] - 2026-04-23
 

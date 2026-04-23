@@ -45,22 +45,20 @@ ssd1306 = { version = "0.10", features = ["async"] }
 embedded-io-async = "0.7"
 embassy-futures = "0.1"
 
-# ESP32-S3 (Heltec V3) — requires esp toolchain (espup)
+# Xtensa ESP crates — requires esp toolchain (espup). The chip feature
+# (esp32 / esp32s3) is selected per board via the board-level feature flag
+# below, so the same dep lines support both classic ESP32 and ESP32-S3.
 esp-backtrace = { version = "0.18", optional = true, features = [
-  "esp32s3",
   "panic-handler",
   "defmt",
 ] }
 esp-hal = { version = "1.0", optional = true, features = [
-  "esp32s3",
   "unstable",
 ] }
 esp-println = { version = "0.16", optional = true, features = [
-  "esp32s3",
   "defmt-espflash",
 ] }
 esp-rtos = { version = "0.2", optional = true, features = [
-  "esp32s3",
   "embassy",
 ] }
 
@@ -110,6 +108,10 @@ heltec_v3 = [
   "dep:esp-hal",
   "dep:esp-println",
   "dep:esp-rtos",
+  "esp-backtrace/esp32s3",
+  "esp-hal/esp32s3",
+  "esp-println/esp32s3",
+  "esp-rtos/esp32s3",
 ]
 heltec_v3_uart = [
   "embassy",
@@ -117,6 +119,10 @@ heltec_v3_uart = [
   "dep:esp-hal",
   "dep:esp-println",
   "dep:esp-rtos",
+  "esp-backtrace/esp32s3",
+  "esp-hal/esp32s3",
+  "esp-println/esp32s3",
+  "esp-rtos/esp32s3",
 ]
 heltec_v4 = [
   "embassy",
@@ -124,6 +130,10 @@ heltec_v4 = [
   "dep:esp-hal",
   "dep:esp-println",
   "dep:esp-rtos",
+  "esp-backtrace/esp32s3",
+  "esp-hal/esp32s3",
+  "esp-println/esp32s3",
+  "esp-rtos/esp32s3",
 ]
 elecrow_thinknode_m2 = [
   "embassy",
@@ -131,6 +141,10 @@ elecrow_thinknode_m2 = [
   "dep:esp-hal",
   "dep:esp-println",
   "dep:esp-rtos",
+  "esp-backtrace/esp32s3",
+  "esp-hal/esp32s3",
+  "esp-println/esp32s3",
+  "esp-rtos/esp32s3",
 ]
 lilygo_tbeam_supreme = [
   "embassy",
@@ -138,6 +152,21 @@ lilygo_tbeam_supreme = [
   "dep:esp-hal",
   "dep:esp-println",
   "dep:esp-rtos",
+  "esp-backtrace/esp32s3",
+  "esp-hal/esp32s3",
+  "esp-println/esp32s3",
+  "esp-rtos/esp32s3",
+]
+lilygo_tbeam = [
+  "embassy",
+  "dep:esp-backtrace",
+  "dep:esp-hal",
+  "dep:esp-println",
+  "dep:esp-rtos",
+  "esp-backtrace/esp32",
+  "esp-hal/esp32",
+  "esp-println/esp32",
+  "esp-rtos/esp32",
 ]
 rak_wisblock_4631 = [
   "embassy",

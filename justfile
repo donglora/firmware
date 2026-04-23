@@ -10,6 +10,7 @@ heltec_v3      := "heltec_v3 xtensa-esp32s3-none-elf esp32s3"
 heltec_v3_uart := "heltec_v3_uart xtensa-esp32s3-none-elf esp32s3"
 heltec_v4      := "heltec_v4 xtensa-esp32s3-none-elf esp32s3"
 elecrow_thinknode_m2 := "elecrow_thinknode_m2 xtensa-esp32s3-none-elf esp32s3"
+lilygo_tbeam         := "lilygo_tbeam xtensa-esp32-none-elf esp32"
 lilygo_tbeam_supreme := "lilygo_tbeam_supreme xtensa-esp32s3-none-elf esp32s3"
 rak_wisblock_4631  := "rak_wisblock_4631 thumbv7em-none-eabihf nRF52840_xxAA"
 wio_tracker_l1     := "wio_tracker_l1 thumbv7em-none-eabihf nRF52840_xxAA"
@@ -19,7 +20,7 @@ builds_dir := "builds"
 version := `sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml`
 
 # All known boards
-boards := "heltec_v3 heltec_v3_uart heltec_v4 elecrow_thinknode_m2 lilygo_tbeam_supreme rak_wisblock_4631 waveshare_rp2040_lora wio_tracker_l1"
+boards := "heltec_v3 heltec_v3_uart heltec_v4 elecrow_thinknode_m2 lilygo_tbeam lilygo_tbeam_supreme rak_wisblock_4631 waveshare_rp2040_lora wio_tracker_l1"
 
 # Install all required tools and toolchains
 setup:
@@ -215,6 +216,7 @@ _info name:
      elif [ "{{name}}" == "heltec_v3_uart" ]; then echo "{{heltec_v3_uart}}"; \
      elif [ "{{name}}" == "heltec_v4" ]; then echo "{{heltec_v4}}"; \
      elif [ "{{name}}" == "elecrow_thinknode_m2" ]; then echo "{{elecrow_thinknode_m2}}"; \
+     elif [ "{{name}}" == "lilygo_tbeam" ]; then echo "{{lilygo_tbeam}}"; \
      elif [ "{{name}}" == "lilygo_tbeam_supreme" ]; then echo "{{lilygo_tbeam_supreme}}"; \
      elif [ "{{name}}" == "rak_wisblock_4631" ]; then echo "{{rak_wisblock_4631}}"; \
      elif [ "{{name}}" == "waveshare_rp2040_lora" ]; then echo "{{waveshare_rp2040_lora}}"; \

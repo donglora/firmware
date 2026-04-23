@@ -6,7 +6,11 @@
 pub mod framing;
 
 cfg_if::cfg_if! {
-    if #[cfg(any(feature = "heltec_v3_uart", feature = "elecrow_thinknode_m2"))] {
+    if #[cfg(any(
+        feature = "heltec_v3_uart",
+        feature = "elecrow_thinknode_m2",
+        feature = "lilygo_tbeam"
+    ))] {
         mod uart;
         pub use uart::host_task;
     } else {

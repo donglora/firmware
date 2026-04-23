@@ -3,7 +3,11 @@ pub mod traits;
 pub use traits::*;
 
 {% for helper, helper_features in helpers|items -%}
+{% if helper_features|length == 1 -%}
+#[cfg(feature = "{{ helper_features[0] }}")]
+{% else -%}
 #[cfg(any({% for f in helper_features %}feature = "{{ f }}"{% if not loop.last %}, {% endif %}{% endfor %}))]
+{% endif -%}
 mod {{ helper }};
 {% endfor %}
 cfg_if::cfg_if! {

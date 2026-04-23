@@ -65,6 +65,21 @@ pub trait LoRaBoard: Sized {
         (150_000_000, 960_000_000)
     }
 
+    /// Bitmap of supported LoRa spreading factors — bit N = SF N. Defaults
+    /// to SX126x's SF5–SF12 (`0x1FE0`). SX127x boards must override to
+    /// `0x1FC0` (SF6–SF12); LLCC68 boards to `0x0FE0` (SF5–SF11).
+    fn supported_sf_bitmap() -> u16 {
+        0x1FE0
+    }
+
+    /// Bitmap of supported LoRa bandwidths. Bit positions match
+    /// `LoRaBandwidth::as_u8()` (sub-GHz BW enum values 0..9). Defaults
+    /// to all sub-GHz BWs (`0x03FF`). SX128x boards flip the 2.4 GHz
+    /// bits when we add them.
+    fn supported_bw_bitmap() -> u16 {
+        0x03FF
+    }
+
     /// Decompose initialized board into peripheral bundles for each task.
     fn into_parts(
         self,

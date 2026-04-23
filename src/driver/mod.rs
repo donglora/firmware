@@ -5,7 +5,7 @@
 ))]
 pub mod sh1106;
 
-#[cfg(feature = "lilygo_tbeam_supreme")]
+#[cfg(any(feature = "lilygo_tbeam_supreme", feature = "lilygo_tbeam"))]
 pub mod axp;
 
 #[cfg(any(
@@ -14,6 +14,7 @@ pub mod axp;
     feature = "heltec_v4",
     feature = "elecrow_thinknode_m2",
     feature = "lilygo_tbeam_supreme",
+    feature = "lilygo_tbeam",
     feature = "wio_tracker_l1",
     feature = "waveshare_rp2040_lora"
 ))]

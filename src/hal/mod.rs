@@ -12,6 +12,9 @@
 ))]
 pub mod esp32s3;
 
+#[cfg(feature = "lilygo_tbeam")]
+pub mod esp32;
+
 #[cfg(any(feature = "rak_wisblock_4631", feature = "wio_tracker_l1"))]
 pub mod nrf52840;
 
