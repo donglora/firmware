@@ -7,6 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **OLED auto-dim after inactivity.** The display is bright on any
+  activity — splash entry, mode change into a dashboard leaf, packet
+  RX/TX — and dims after a short idle window. Splash holds bright for
+  10 s, then drops to dim while the LearnMore / Info carousel keeps
+  alternating. The dashboard stays bright for 3 s after the last
+  packet or mode change, then dims in place without changing
+  Listening/Transmitting state. Cross-leaf TX↔RX hops transition
+  bright→bright with no intermediate dim — `set_dim` is fired as an
+  action by the 3 s timer handler rather than as a sibling `exit:`
+  action, so mode-change leaf-crossings never see a flash.
+- `DisplayBrightness` trait in `src/driver/mod.rs` unifies the
+  two-level backlight API across the `ssd1306` crate's `Ssd1306Async`
+  and the in-tree `Sh1106` driver. Contrast values centralized as
+  `CONTRAST_BRIGHT` (`0xFF`) and `CONTRAST_DIM` (`0x08`) constants so
+  the two levels can be tuned in one place.
+
+### Changed
+
+- `src/display.rs` statechart restructured:
+  - `Splash` gains `entry: set_bright` plus an action-only
+    `on(after 10s) => set_dim` handler so the splash bright window
+    is time-scoped without disturbing the LM↔Info alternation.
+  - `Dashboard` `Listening` and `Transmitting` each gain a nested
+    `*Bright` substate owning the `entry: set_bright` action. Packet
+    handlers moved into the leaves and target the leaf's `*Bright` —
+    sibling-to-sibling within the leaf restarts the 3 s timer without
+    re-entering the leaf itself (paint / 1 s sparkline timer
+    preserved). The 3 s timeout handler fires `set_dim` as an action
+    and up-transitions to the leaf, parking the machine at the leaf
+    with no active child.
+- `On.on(CmdReset)` now targets `LearnMore` directly rather than
+  `Splash`. Under hsmc 0.2 up-transition semantics, targeting
+  `Splash` from within `Splash.LearnMore` (USB-disconnect race path)
+  would only unwind below `Splash` and park with no active child,
+  leaving the LM↔Info alternation timer dead and the QR frozen on
+  screen.
+- `LoRaBoard::DisplayDriver` trait bound extended with
+  `+ DisplayBrightness` so brightness is part of the board contract
+  alongside `DrawTarget<Color = BinaryColor>`.
+
+### Fixed
+
+- Elecrow ThinkNode-M2 board doc corrected: the shipping revision
+  carries a WCH CH340K USB-UART bridge (USB `1a86:7522`), not a
+  Silicon Labs CP2102. `just flash elecrow_thinknode_m2` now matches
+  the CH340K / CH340 VID:PIDs directly instead of falling through
+  to espflash auto-detect.
+
+### Dependencies
+
+- `hsmc` bumped to `0.2` to pick up the up-transition fix (transition
+  to an already-active ancestor unwinds only the subtree strictly
+  below the target; no exit/entry on the target; no default descent).
+
 ## [1.1.0] - 2026-04-22
 
 Small but high-value behavior change: `SET_CONFIG` issued while the

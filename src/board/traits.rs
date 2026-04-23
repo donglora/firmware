@@ -9,6 +9,8 @@
 use embedded_graphics::draw_target::DrawTarget;
 use embedded_graphics::pixelcolor::BinaryColor;
 
+use crate::driver::DisplayBrightness;
+
 /// Async RGB LED control. Boards without an LED use `()` which is a no-op.
 pub trait RgbLed {
     fn set_rgb(&mut self, r: u8, g: u8, b: u8) -> impl core::future::Future<Output = ()>;
@@ -35,8 +37,9 @@ pub trait LoRaBoard: Sized {
     /// Display peripheral bundle (I2C bus for display init).
     type DisplayParts;
 
-    /// Concrete display driver type (must implement DrawTarget for rendering).
-    type DisplayDriver: DrawTarget<Color = BinaryColor>;
+    /// Concrete display driver type (must implement DrawTarget for rendering
+    /// and DisplayBrightness for the two-level dim control).
+    type DisplayDriver: DrawTarget<Color = BinaryColor> + DisplayBrightness;
 
     /// RGB LED driver. Boards without an LED use `()`.
     type LedDriver: RgbLed;

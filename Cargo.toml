@@ -31,7 +31,7 @@ embassy-usb-driver = "0.2"
 ucobs = { version = "0.3", features = ["legacy-msrv"] }
 heapless = "0.9"
 donglora-protocol = "1.1.0"
-hsmc = { version = "0.1.0", default-features = false, features = ["embassy"] }
+hsmc = { version = "0.2", default-features = false, features = ["embassy"] }
 lora-phy = "3.0"
 portable-atomic = { version = "1", optional = true, default-features = false, features = ["critical-section"] }
 static_cell = "2.1"

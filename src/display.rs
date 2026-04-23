@@ -37,6 +37,7 @@ use embassy_time::Timer;
 use hsmc::statechart;
 
 use crate::board::{self, Board, DisplayDriver, DisplayParts, LedDriver, LoRaBoard, RgbLed};
+use crate::driver::DisplayBrightness;
 use crate::channel::{DisplayCommand, DisplayCommandChannel, RadioEvent, RadioEventChannel};
 use crate::protocol::LoRaConfig;
 
@@ -220,6 +221,14 @@ impl DisplayContext {
         Timer::after_millis(50).await;
         self.peripherals.led.set_rgb(0, 0, 0).await;
     }
+
+    async fn oled_bright(&mut self) {
+        self.peripherals.display.set_bright().await;
+    }
+
+    async fn oled_dim(&mut self) {
+        self.peripherals.display.set_dim().await;
+    }
 }
 
 // ── Statechart ─────────────────────────────────────────────────────
@@ -243,16 +252,26 @@ statechart! {
             on(CmdOff) => Off;
             // `CmdReset` + `RadioIdle` race on USB disconnect; this handler
             // makes either ordering land in the same place. Reset the run
-            // state, turn off any blink-in-progress, and re-enter Splash —
-            // descend_defaults lands us in LearnMore with a fresh 5 s timer.
-            on(CmdReset) => reset_run_state, turn_led_off, Splash;
+            // state, turn off any blink-in-progress, and land in LearnMore
+            // with a fresh 5 s timer. We target `LearnMore` (not `Splash`)
+            // because under hsmc 0.2 up-transition semantics, targeting a
+            // state that's already on the active path would only unwind
+            // below it — we'd park at `Splash` with no active child and
+            // the alternation timer would never restart.
+            on(CmdReset) => reset_run_state, turn_led_off, LearnMore;
             // Config can arrive before the dashboard is up; cache it anywhere.
             on(ConfigChanged(cfg: LoRaConfig)) => save_new_config;
 
+            // Splash is bright for the first 10 s of (re-)entry, then the
+            // action-only `on(after 10s)` handler drops the OLED to dim.
+            // LearnMore ↔ Info keep alternating underneath — their own
+            // timers are independent of the 10 s window.
             state Splash {
+                entry: set_bright;
                 default(LearnMore);
                 on(EnteredRx) => Listening;
                 on(EnteredTx) => Transmitting;
+                on(after Duration::from_secs(10)) => set_dim;
 
                 state LearnMore {
                     entry: paint_learn_more;
@@ -265,24 +284,56 @@ statechart! {
                 }
             }
 
+            // Dashboard brightness pattern: each mode-leaf holds a `Bright`
+            // substate. `entry: set_bright` owns the backlight going on;
+            // `set_dim` is fired **as an action** by the 3 s timeout
+            // handler, immediately before the up-transition that parks
+            // the machine at the leaf. The symmetric `exit: set_dim`
+            // would also fire on mode-change leaf-crossings (e.g.
+            // ListeningBright → TransmittingBright via EnteredTx), and
+            // the subsequent default descent would fire `set_bright`
+            // again — producing a visible dim/bright flash on every
+            // TX↔RX swap. Anchoring dim to the *timer* handler instead
+            // means leaf-crossings go bright→bright with no intermediate
+            // dim action. CmdOff/CmdReset exit paths don't fire set_dim
+            // either, which is fine — the display is blanked or walked
+            // back to Splash, which re-asserts its own brightness.
             state Dashboard {
                 default(Listening);
                 on(RadioIdle) => Splash;
 
-                // Packet events are pure data + one-shot LED feedback.
-                on(PacketRx { rssi: i16, snr: Option<i16> }) => record_rx_packet, blink_rx_led;
-                on(PacketTx) => record_tx_packet, blink_tx_led;
-
                 state Listening {
                     entry: paint_listening;
+                    default(ListeningBright);
                     on(EnteredTx) => Transmitting;
                     on(every Duration::from_millis(1000)) => advance_sparkline, paint_listening;
+                    // Split from the transition below because hsmc rejects
+                    // payload bindings on transition-bearing handlers.
+                    on(PacketRx { rssi: i16, snr: Option<i16> }) => record_rx_packet, blink_rx_led;
+                    on(PacketRx) => ListeningBright;
+                    on(PacketTx) => record_tx_packet, blink_tx_led;
+                    on(PacketTx) => ListeningBright;
+
+                    state ListeningBright {
+                        entry: set_bright;
+                        on(after Duration::from_secs(3)) => set_dim, Listening;
+                    }
                 }
 
                 state Transmitting {
                     entry: paint_transmitting;
+                    default(TransmittingBright);
                     on(EnteredRx) => Listening;
                     on(every Duration::from_millis(1000)) => advance_sparkline, paint_transmitting;
+                    on(PacketRx { rssi: i16, snr: Option<i16> }) => record_rx_packet, blink_rx_led;
+                    on(PacketRx) => TransmittingBright;
+                    on(PacketTx) => record_tx_packet, blink_tx_led;
+                    on(PacketTx) => TransmittingBright;
+
+                    state TransmittingBright {
+                        entry: set_bright;
+                        on(after Duration::from_secs(3)) => set_dim, Transmitting;
+                    }
                 }
             }
         }
@@ -354,6 +405,14 @@ impl DisplayActions for DisplayActionContext<'_> {
 
     async fn advance_sparkline(&mut self) {
         self.run.advance_slot();
+    }
+
+    async fn set_bright(&mut self) {
+        self.oled_bright().await;
+    }
+
+    async fn set_dim(&mut self) {
+        self.oled_dim().await;
     }
 }
 

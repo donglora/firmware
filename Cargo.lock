@@ -1404,9 +1404,9 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "hsmc"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d8cb8820e7ff5fa4fa4b5dbb78b9f59d26ccc8e3bcf69d8f4c4ce29ee01b93a"
+checksum = "960effec6ded897c013d5cde8fb7f09bf0137e783efc4c2e0346092a2941c46e"
 dependencies = [
  "embassy-futures",
  "embassy-sync 0.8.0",
@@ -1417,9 +1417,9 @@ dependencies = [
 
 [[package]]
 name = "hsmc-macros"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c4fa4dad2c05309fae4f6d15b74d9b37c1fd7325a96701972fdad89637635160"
+checksum = "3e1933eea1e95edb4fa03688f969f0a1ffabc4f16fc396b40ead6bedd5c4bdff"
 dependencies = [
  "proc-macro2",
  "quote",
