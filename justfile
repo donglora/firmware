@@ -1,43 +1,29 @@
-set shell := ["bash", "-c"]
-
-# Board definitions: feature target chip
-# Xtensa targets use the self-contained esp toolchain (espup-installed) with
-# `-Zbuild-std=core,alloc`. Using `+esp` rather than `+nightly` keeps the
-# compiler and rust-src versions aligned — the public nightly drifts ahead of
-# the esp fork and breaks core-stdlib compilation otherwise.
-# Tool versions are pinned in mise.toml; run `just setup` to install everything.
-heltec_v3      := "heltec_v3 xtensa-esp32s3-none-elf esp32s3"
-heltec_v3_uart := "heltec_v3_uart xtensa-esp32s3-none-elf esp32s3"
-heltec_v4      := "heltec_v4 xtensa-esp32s3-none-elf esp32s3"
-elecrow_thinknode_m2 := "elecrow_thinknode_m2 xtensa-esp32s3-none-elf esp32s3"
-lilygo_tbeam         := "lilygo_tbeam xtensa-esp32-none-elf esp32"
-lilygo_tbeam_supreme := "lilygo_tbeam_supreme xtensa-esp32s3-none-elf esp32s3"
-rak_wisblock_4631  := "rak_wisblock_4631 thumbv7em-none-eabihf nRF52840_xxAA"
-wio_tracker_l1     := "wio_tracker_l1 thumbv7em-none-eabihf nRF52840_xxAA"
-waveshare_rp2040_lora := "waveshare_rp2040_lora thumbv6m-none-eabi rp2040"
+# Run every recipe with mise's tool versions active — so `just` invocations
+# of cargo, espflash, rust-objcopy, etc. always resolve to the pinned
+# versions in mise.toml, even if the user has a different version elsewhere
+# on PATH (e.g. a stray `cargo install espflash`).
+set shell := ["mise", "exec", "--", "sh", "-c"]
 
 builds_dir := "builds"
 version := `sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml`
 
-# All known boards
+# All known boards. ADD A NEW BOARD HERE and in the `_info` case below.
+#
+# Board metadata ("feature target chip") lives in the `_info` recipe —
+# Xtensa targets are built with `+esp` + `-Zbuild-std=core,alloc` (the
+# self-contained esp toolchain ships its own rust-src; the public
+# nightly drifts ahead and breaks core-stdlib compilation).
 boards := "heltec_v3 heltec_v3_uart heltec_v4 elecrow_thinknode_m2 lilygo_tbeam lilygo_tbeam_supreme rak_wisblock_4631 waveshare_rp2040_lora wio_tracker_l1"
 
 # Install all required tools and toolchains
 setup:
     mise trust --yes
     mise install
-    @# ESP Xtensa toolchain (not managed by mise)
+    @# ESP Xtensa toolchain (not a rustup component — installed out-of-band by espup)
     @if ! rustup toolchain list | grep -q "^esp"; then \
         echo "ESP toolchain not found, installing via espup (this may take a while)..."; \
         espup install || { echo "error: espup install failed" >&2; exit 1; }; \
     fi
-    @# nightly rust-src for -Zbuild-std
-    @if ! rustup component list --toolchain nightly --installed 2>/dev/null | grep -q "^rust-src"; then \
-        rustup component add rust-src --toolchain nightly; \
-    fi
-    @# ARM targets
-    @rustup target list --installed | grep -q "^thumbv6m-none-eabi$" || rustup target add thumbv6m-none-eabi
-    @rustup target list --installed | grep -q "^thumbv7em-none-eabihf$" || rustup target add thumbv7em-none-eabihf
 
 # Build release firmware for all boards, installing toolchains as needed
 build-all:
@@ -76,7 +62,7 @@ build board profile="release":
 flash board:
     @just _ensure_tools
     @just build {{board}} release
-    @read -r feat target chip <<< "$(just _info {{board}})"; \
+    @set -- $(just _info {{board}}); feat=$1; target=$2; chip=$3; \
     case "$target" in \
         xtensa-*) \
             port=$(just _find_port "303a:1001" "1209:5741" "10c4:ea60" "1a86:7522" "1a86:7523"); \
@@ -94,7 +80,7 @@ flash board:
 flash-probe board:
     @just _ensure_tools
     @just build {{board}} release
-    @read -r feat target chip <<< "$(just _info {{board}})"; \
+    @set -- $(just _info {{board}}); feat=$1; target=$2; chip=$3; \
     probe-rs run --chip $chip "{{builds_dir}}/donglora-{{board}}-v{{version}}.elf"
 
 # Show binary size for a release build
@@ -121,7 +107,7 @@ _ensure_tools:
 [private]
 _cargo board cmd extra_args="":
     @just _ensure_tools
-    @read -r feat target chip <<< "$(just _info {{board}})"; \
+    @set -- $(just _info {{board}}); feat=$1; target=$2; chip=$3; \
     extra=""; buildstd=""; \
     case "$target" in xtensa-*) \
         just _require_esp_toolchain; \
@@ -133,7 +119,7 @@ _cargo board cmd extra_args="":
 # Ensure a board's toolchain is available, auto-installing if needed
 [private]
 _can_build board:
-    @read -r feat target chip <<< "$(just _info {{board}})"; \
+    @set -- $(just _info {{board}}); feat=$1; target=$2; chip=$3; \
     case "$target" in \
         xtensa-*) just _require_esp_toolchain ;; \
         *) rustup target list --installed | grep -q "^$target$" || rustup target add "$target" ;; \
@@ -169,25 +155,25 @@ _find_port +vid_pids:
 [private]
 _copy_firmware board profile:
     @mkdir -p {{builds_dir}}
-    @read -r feat target chip <<< "$(just _info {{board}})"; \
+    @set -- $(just _info {{board}}); feat=$1; target=$2; chip=$3; \
     src="target/$target/{{profile}}/donglora"; \
     dst="{{builds_dir}}/donglora-{{board}}-v{{version}}"; \
     if [ -f "$src" ]; then \
         cp "$src" "$dst.elf"; echo "→ $dst.elf"; \
         case "$target" in \
             xtensa-*) \
-                mise exec -- espflash save-image --chip "$chip" --merge --skip-padding "$src" "$dst.bin"; \
+                espflash save-image --chip "$chip" --merge --skip-padding "$src" "$dst.bin"; \
                 echo "→ $dst.bin"; \
                 ;; \
             thumbv6m-*) \
-                mise exec -- rust-objcopy -O ihex "$src" "$dst.hex"; \
-                mise exec -- cargo-hex-to-uf2 hex-to-uf2 --input-path "$dst.hex" --output-path "$dst.uf2" --family rp2040; \
+                rust-objcopy -O ihex "$src" "$dst.hex"; \
+                cargo-hex-to-uf2 hex-to-uf2 --input-path "$dst.hex" --output-path "$dst.uf2" --family rp2040; \
                 rm "$dst.hex"; \
                 echo "→ $dst.uf2"; \
                 ;; \
             thumbv7em-*) \
-                mise exec -- rust-objcopy -O ihex "$src" "$dst.hex"; \
-                mise exec -- cargo-hex-to-uf2 hex-to-uf2 --input-path "$dst.hex" --output-path "$dst.uf2" --family nrf52840; \
+                rust-objcopy -O ihex "$src" "$dst.hex"; \
+                cargo-hex-to-uf2 hex-to-uf2 --input-path "$dst.hex" --output-path "$dst.uf2" --family nrf52840; \
                 rm "$dst.hex"; \
                 echo "→ $dst.uf2"; \
                 ;; \
@@ -210,15 +196,19 @@ _flash_uf2 board:
     sync; \
     echo "Done — board will reboot automatically"
 
+# Single source of truth for per-board metadata: "feature target chip".
+# ADD A NEW BOARD HERE and in the `boards` list near the top of this file.
 [private]
 _info name:
-    @if [ "{{name}}" == "heltec_v3" ]; then echo "{{heltec_v3}}"; \
-     elif [ "{{name}}" == "heltec_v3_uart" ]; then echo "{{heltec_v3_uart}}"; \
-     elif [ "{{name}}" == "heltec_v4" ]; then echo "{{heltec_v4}}"; \
-     elif [ "{{name}}" == "elecrow_thinknode_m2" ]; then echo "{{elecrow_thinknode_m2}}"; \
-     elif [ "{{name}}" == "lilygo_tbeam" ]; then echo "{{lilygo_tbeam}}"; \
-     elif [ "{{name}}" == "lilygo_tbeam_supreme" ]; then echo "{{lilygo_tbeam_supreme}}"; \
-     elif [ "{{name}}" == "rak_wisblock_4631" ]; then echo "{{rak_wisblock_4631}}"; \
-     elif [ "{{name}}" == "waveshare_rp2040_lora" ]; then echo "{{waveshare_rp2040_lora}}"; \
-     elif [ "{{name}}" == "wio_tracker_l1" ]; then echo "{{wio_tracker_l1}}"; \
-     else echo "Unknown board: {{name}}" >&2; exit 1; fi
+    @case "{{name}}" in \
+        heltec_v3)             echo "heltec_v3 xtensa-esp32s3-none-elf esp32s3" ;; \
+        heltec_v3_uart)        echo "heltec_v3_uart xtensa-esp32s3-none-elf esp32s3" ;; \
+        heltec_v4)             echo "heltec_v4 xtensa-esp32s3-none-elf esp32s3" ;; \
+        elecrow_thinknode_m2)  echo "elecrow_thinknode_m2 xtensa-esp32s3-none-elf esp32s3" ;; \
+        lilygo_tbeam)          echo "lilygo_tbeam xtensa-esp32-none-elf esp32" ;; \
+        lilygo_tbeam_supreme)  echo "lilygo_tbeam_supreme xtensa-esp32s3-none-elf esp32s3" ;; \
+        rak_wisblock_4631)     echo "rak_wisblock_4631 thumbv7em-none-eabihf nRF52840_xxAA" ;; \
+        waveshare_rp2040_lora) echo "waveshare_rp2040_lora thumbv6m-none-eabi rp2040" ;; \
+        wio_tracker_l1)        echo "wio_tracker_l1 thumbv7em-none-eabihf nRF52840_xxAA" ;; \
+        *) echo "Unknown board: {{name}}" >&2; exit 1 ;; \
+    esac

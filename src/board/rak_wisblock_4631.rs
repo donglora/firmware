@@ -20,7 +20,7 @@ type RadioSpiDevice = SpiDevice<'static, NoopRawMutex, mcu::SpiBus, Nss>;
 pub type RadioDriver = Sx126x<RadioSpiDevice, Iv, Sx1262>;
 pub type UsbDriver = mcu::UsbNrfDriver;
 pub type DisplayI2c = mcu::I2cBus;
-pub type LedDriver = ();
+pub type LedDriver = crate::driver::simple_led::SimpleLed<Output<'static>>;
 
 pub type DisplayDriver = ssd1306::Ssd1306Async<
     ssd1306::prelude::I2CInterface<DisplayI2c>,
@@ -78,10 +78,14 @@ impl LoRaBoard for Board {
     type CommParts = UsbParts;
     type DisplayParts = DisplayParts;
     type DisplayDriver = DisplayDriver;
-    type LedDriver = ();
+    type LedDriver = LedDriver;
 
     fn init() -> Self {
-        let p = embassy_nrf::init(Default::default());
+        // USB requires the 32 MHz HFXO (±50 ppm); the RC oscillator is out of spec.
+        let mut config = embassy_nrf::config::Config::default();
+        config.hfclk_source = embassy_nrf::config::HfclkSource::ExternalXtal;
+        config.lfclk_source = embassy_nrf::config::LfclkSource::ExternalXtal;
+        let p = embassy_nrf::init(config);
         Self { p }
     }
 
@@ -89,12 +93,18 @@ impl LoRaBoard for Board {
         mcu::mac_address()
     }
 
-    fn into_parts(self) -> BoardParts<RadioParts, UsbParts, DisplayParts, ()> {
+    fn into_parts(self) -> BoardParts<RadioParts, UsbParts, DisplayParts, LedDriver> {
         let p = self.p;
+
+        // SX1262 is power-gated on P1.05 — must be HIGH before any SPI access.
+        let sx_power_en = Output::new(p.P1_05, Level::High, OutputDrive::Standard);
+        core::mem::forget(sx_power_en);
 
         // ── SPI bus for SX1262 ──────────────────────────────────
         let mut spi_cfg = spim::Config::default();
         spi_cfg.frequency = spim::Frequency::M1;
+        // embassy_nrf::spim::Spim::new args: (spim, irq, sck, miso, mosi, config).
+        // Per RAK4631 BSP: SCK=P1.11, MISO=P1.13, MOSI=P1.12.
         let spi = Spim::new(p.SPI3, mcu::Irqs, p.P1_11, p.P1_13, p.P1_12, spi_cfg);
         let spi_bus = mcu::share_spi_bus(spi);
 
@@ -121,7 +131,9 @@ impl LoRaBoard for Board {
         };
 
         // ── USB ─────────────────────────────────────────────────
-        let vbus = mcu::alloc_vbus_detect(true, false);
+        // SoftwareVbusDetect(vbus_detected, power_ready). Mark both true so the
+        // driver doesn't block waiting for a power-ready signal we never raise.
+        let vbus = mcu::alloc_vbus_detect(true, true);
         let host = UsbParts {
             driver: Driver::new(p.USBD, mcu::Irqs, vbus),
         };
@@ -138,11 +150,15 @@ impl LoRaBoard for Board {
         );
         let display = Some(DisplayParts { i2c });
 
+        // Green LED on P1.03 (RAK19007 Base, active HIGH).
+        let led_pin = Output::new(p.P1_03, Level::Low, OutputDrive::Standard);
+        let led = crate::driver::simple_led::SimpleLed(led_pin);
+
         BoardParts {
             radio,
             host,
             display,
-            led: (),
+            led,
             mac: Self::mac_address(),
         }
     }

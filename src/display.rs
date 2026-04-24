@@ -37,8 +37,8 @@ use embassy_time::Timer;
 use hsmc::statechart;
 
 use crate::board::{self, Board, DisplayDriver, DisplayParts, LedDriver, LoRaBoard, RgbLed};
-use crate::driver::DisplayBrightness;
 use crate::channel::{DisplayCommand, DisplayCommandChannel, RadioEvent, RadioEventChannel};
+use crate::driver::DisplayBrightness;
 use crate::protocol::LoRaConfig;
 
 use render::{BoardInfo, RSSI_HISTORY_LEN};

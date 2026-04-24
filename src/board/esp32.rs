@@ -86,8 +86,8 @@ pub fn init_radio(
     let reset = Output::new(reset_pin, Level::High, OutputConfig::default());
     let dio0 = Input::new(dio0_pin, InputConfig::default().with_pull(Pull::Down));
 
-    let iv = GenericSx127xInterfaceVariant::new(reset, dio0, None, None)
-        .expect("SX1276 interface init");
+    let iv =
+        GenericSx127xInterfaceVariant::new(reset, dio0, None, None).expect("SX1276 interface init");
 
     let sx_config = sx127x::Config {
         chip: sx127x::Sx1276,

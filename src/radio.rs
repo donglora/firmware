@@ -369,6 +369,8 @@ async fn next_packet(
 }
 
 async fn perform_tx(lora: &mut LoRaDriver, pending: &mut Option<PendingTx>) -> RadioInput {
+    #[cfg(feature = "debug-checkpoint")]
+    crate::debug_blink::set(6);
     let Some(tx) = pending.take() else {
         return RadioInput::TransmitFailed;
     };
@@ -378,7 +380,11 @@ async fn perform_tx(lora: &mut LoRaDriver, pending: &mut Option<PendingTx>) -> R
             airtime_us: Instant::now().duration_since(start).as_micros() as u32,
         },
         Ok(TxOutcome::ChannelBusy) => RadioInput::ChannelBusy,
-        Err(_) => RadioInput::TransmitFailed,
+        Err(_) => {
+            #[cfg(feature = "debug-checkpoint")]
+            crate::debug_blink::set(15);
+            RadioInput::TransmitFailed
+        }
     }
 }
 
@@ -705,7 +711,13 @@ async fn do_tx(lora: &mut LoRaDriver, tx: &PendingTx) -> Result<TxOutcome, Radio
     let mdltn = to_lora_mod_params(lora, &tx.config)?;
 
     if !tx.skip_cad {
+        #[cfg(feature = "debug-checkpoint")]
+        crate::debug_blink::set(7);
         lora.prepare_for_cad(&mdltn).await?;
+        // Reaches here → prepare_for_cad (SPI setup) completed.
+        // Hang past here means lora.cad() is waiting on DIO1.
+        #[cfg(feature = "debug-checkpoint")]
+        crate::debug_blink::set(19);
         let mut saw_activity = false;
         for _ in 0..CAD_MAX_RETRIES {
             if !lora.cad(&mdltn).await? {
@@ -728,9 +740,15 @@ async fn do_tx(lora: &mut LoRaDriver, tx: &PendingTx) -> Result<TxOutcome, Radio
         tx.config.iq_invert,
         &mdltn,
     )?;
+    #[cfg(feature = "debug-checkpoint")]
+    crate::debug_blink::set(8);
     lora.prepare_for_tx(&mdltn, &mut tx_pkt, tx.config.tx_power_dbm as i32, &tx.data)
         .await?;
+    #[cfg(feature = "debug-checkpoint")]
+    crate::debug_blink::set(9);
     lora.tx().await?;
+    #[cfg(feature = "debug-checkpoint")]
+    crate::debug_blink::set(10);
     Ok(TxOutcome::Transmitted)
 }
 
@@ -781,13 +799,19 @@ pub async fn radio_task(
     events: &'static RadioEventChannel,
     info: &'static Info,
 ) {
+    #[cfg(feature = "debug-checkpoint")]
+    crate::debug_blink::set(1);
     let lora = match LoRa::new(parts.driver, false, parts.delay).await {
         Ok(l) => {
             info!("radio initialized");
+            #[cfg(feature = "debug-checkpoint")]
+            crate::debug_blink::set(2);
             l
         }
         Err(e) => {
             error!("radio init failed: {}", e);
+            #[cfg(feature = "debug-checkpoint")]
+            crate::debug_blink::set(16);
             return;
         }
     };

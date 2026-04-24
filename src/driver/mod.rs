@@ -18,6 +18,7 @@ pub mod inverted_pin;
     feature = "elecrow_thinknode_m2",
     feature = "lilygo_tbeam_supreme",
     feature = "lilygo_tbeam",
+    feature = "rak_wisblock_4631",
     feature = "wio_tracker_l1",
     feature = "waveshare_rp2040_lora"
 ))]

@@ -138,15 +138,16 @@ fn phase_depth(n: u8) -> u8 {
     match n {
         18 => 1,  // pre-TX: CmdTransmit just read from commands channel
         6 => 2,   // perform_tx entered
-        7 => 3,   // in CAD
-        8 => 4,   // in prepare_for_tx
-        9 => 5,   // in tx().await
-        10 => 6,  // do_tx returned Ok
-        11 => 7,  // respond_tx_done entered
-        12 => 8,  // respond_tx_done: responses.send returned
-        13 => 9,  // host_task received response from channel
-        14 => 10, // host_task wrote response to UART (terminal success)
-        15 => 11, // TX errored (terminal error)
+        7 => 3,   // in CAD (before prepare_for_cad)
+        19 => 4,  // after prepare_for_cad (awaiting lora.cad IRQ)
+        8 => 5,   // in prepare_for_tx
+        9 => 6,   // in tx().await
+        10 => 7,  // do_tx returned Ok
+        11 => 8,  // respond_tx_done entered
+        12 => 9,  // respond_tx_done: responses.send returned
+        13 => 10, // host_task received response from channel
+        14 => 11, // host_task wrote response to UART (terminal success)
+        15 => 12, // TX errored (terminal error)
         _ => 0,   // not a TX phase
     }
 }
