@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-04-23
+
+### Fixed
+
+- **LilyGo T-Beam (classic) red LED now flashes on TX/RX** instead of
+  dimming off. The red LED under the OLED is wired active-LOW on this
+  board (anode to V+, cathode to GPIO4); v1.3.0 drove it as active-HIGH,
+  so the LED sat lit at idle and briefly dimmed during activity.
+  - Empirically verified on hardware against both T-Beam variants.
+  - Introduces `src/driver/inverted_pin.rs::InvertedPin<P>`, a generic
+    `OutputPin` wrapper that swaps `set_high`/`set_low`. Polarity is
+    expressed at the pin (where the physical wiring lives), so
+    `SimpleLed` stays polarity-agnostic and every other board's code
+    path is byte-for-byte unchanged.
+  - Classic T-Beam now constructs its LED as
+    `SimpleLed(InvertedPin(led_pin))` with pin init at `Level::High`
+    (dark at boot).
+
 ## [1.3.0] - 2026-04-23
 
 ### Added
