@@ -53,15 +53,19 @@ check-all:
 check board:
     @just _cargo {{board}} "clippy --release" "-- -D warnings"
 
-# Build release firmware and copy to builds/ with a readable name
-build board profile="release":
-    @just _cargo {{board}} "build --{{profile}}"
+# Build release firmware and copy to builds/ with a readable name.
+# `extra_features` (comma-separated) is appended to the board feature,
+# e.g. `just build wio_tracker_l1 release debug-checkpoint`.
+build board profile="release" extra_features="":
+    @just _cargo {{board}} "build --{{profile}}" "" "{{extra_features}}"
     @just _copy_firmware {{board}} {{profile}}
 
-# Build and flash a board (espflash for Xtensa, UF2 DFU for ARM)
-flash board:
+# Build and flash a board (espflash for Xtensa, UF2 DFU for ARM).
+# `extra_features` is passed through to the build, e.g.
+# `just flash wio_tracker_l1 debug-checkpoint`.
+flash board extra_features="":
     @just _ensure_tools
-    @just build {{board}} release
+    @just build {{board}} release "{{extra_features}}"
     @set -- $(just _info {{board}}); feat=$1; target=$2; chip=$3; \
     case "$target" in \
         xtensa-*) \
@@ -76,10 +80,11 @@ flash board:
         *) just _flash_uf2 {{board}} ;; \
     esac
 
-# Flash ARM board via debug probe (requires J-Link or similar)
-flash-probe board:
+# Flash ARM board via debug probe (requires J-Link or similar).
+# `extra_features` is passed through to the build.
+flash-probe board extra_features="":
     @just _ensure_tools
-    @just build {{board}} release
+    @just build {{board}} release "{{extra_features}}"
     @set -- $(just _info {{board}}); feat=$1; target=$2; chip=$3; \
     probe-rs run --chip $chip "{{builds_dir}}/donglora-{{board}}-v{{version}}.elf"
 
@@ -102,12 +107,14 @@ outdated:
 _ensure_tools:
     @mise trust --yes . 2>/dev/null; mise install --quiet
 
-# Run a cargo command for a board.
+# Run a cargo command for a board, optionally with extra Cargo features
+# (comma-separated, e.g. "debug-checkpoint").
 # Xtensa: esp toolchain (cargo + rustc + rust-src together) + -Zbuild-std=core
 [private]
-_cargo board cmd extra_args="":
+_cargo board cmd extra_args="" extra_features="":
     @just _ensure_tools
     @set -- $(just _info {{board}}); feat=$1; target=$2; chip=$3; \
+    [ -n "{{extra_features}}" ] && feat="$feat,{{extra_features}}"; \
     extra=""; buildstd=""; \
     case "$target" in xtensa-*) \
         just _require_esp_toolchain; \
