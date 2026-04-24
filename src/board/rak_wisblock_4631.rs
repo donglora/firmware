@@ -113,7 +113,11 @@ impl LoRaBoard for Board {
 
         let reset = Output::new(p.P1_06, Level::High, OutputDrive::Standard);
         let dio1 = Input::new(p.P1_15, Pull::Down);
-        let busy = Input::new(p.P1_14, Pull::Down);
+        // BUSY has an internal 20 kΩ pull-up on the SX1262 die (datasheet
+        // p. 53); an MCU-side Pull::Down fights it and leaves the line at
+        // an indeterminate voltage, making wait_on_busy unreliable. See
+        // lora-rs/lora-rs#260.
+        let busy = Input::new(p.P1_14, Pull::None);
 
         let iv = GenericSx126xInterfaceVariant::new(reset, dio1, busy, None, None)
             .expect("SX1262 interface init");
