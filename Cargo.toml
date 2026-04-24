@@ -32,7 +32,7 @@ ucobs = { version = "0.3", features = ["legacy-msrv"] }
 heapless = "0.9"
 donglora-protocol = "1"
 hsmc = { version = "0.2", default-features = false, features = ["embassy"] }
-lora-phy = "3.0"
+lora-phy = { version = "3.0.2-alpha", features = ["defmt-03"] }  # matches the in-tree [patch.crates-io] override; drop the pre-release selector once upstream releases the fix
 portable-atomic = { version = "1", optional = true, default-features = false, features = ["critical-section"] }
 static_cell = "2.1"
 
@@ -211,6 +211,14 @@ esp-hal       = { git = "https://github.com/esp-rs/esp-hal.git", branch = "main"
 esp-rtos      = { git = "https://github.com/esp-rs/esp-hal.git", branch = "main" }
 esp-backtrace = { git = "https://github.com/esp-rs/esp-hal.git", branch = "main" }
 esp-println   = { git = "https://github.com/esp-rs/esp-hal.git", branch = "main" }
+
+# Local fix for a BUSY-assertion race: lora-phy currently polls BUSY
+# *after* each SPI op, but SX1261-2 §8.1.4 specifies a *pre*-command
+# check (same pattern as RadioLib's SPIwriteStream). This override pulls
+# in the corrected ordering and renames `wait_on_busy` to
+# `wait_until_ready`. See TODO.md for the PR body. Remove this line once
+# the fix is merged upstream + released on crates.io.
+lora-phy      = { path = "../../lora-rs/lora-phy" }
 
 [lints.clippy]
 undocumented_unsafe_blocks = "deny"

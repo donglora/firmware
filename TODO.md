@@ -1,5 +1,64 @@
 # Firmware TODO List
 
+## `lora-phy` fix shipped locally; upstream PR pending submission
+
+Branch: [`swaits/lora-rs @ fix/sx126x-busy-race`](https://github.com/swaits/lora-rs/tree/fix/sx126x-busy-race).
+PR not yet opened. Firmware consumes the fix via `[patch.crates-io]`
+pointing at `../../lora-rs/lora-phy`; drop the patch line + pre-release
+selector once upstream releases.
+
+Hardware-verified on Wio Tracker L1: 20/20 clean-boot TX after the fix
+(vs ~50% before). Additive fix: adds pre-command BUSY check, keeps
+existing post-command wait in place.
+
+### PR body
+
+```
+Title: phy: pre-command BUSY check per Semtech datasheets
+
+## Problem
+
+While bringing up a downstream project (donglora), I hit a race where TX commands would occasionally fail. Tracked it down to lora-phy not following the BUSY-handshake algorithm Semtech recommends: the host should wait on BUSY *before* issuing each command, not after.
+
+Details: `SpiInterface::{write, write_with_payload, read,
+read_with_status}` polls BUSY *after* each SPI op.
+
+On fast MCUs (nRF52840 at 64 MHz, release build) this is racy — `embedded-hal-async`'s `wait_for_low` returns immediately if the pin is already low, and the chip takes up to T_SW ns (SX1261/2 §8.3, Fig. 8-3) to assert BUSY after NSS rises. The host polls inside that pre-assertion window, sees a stale LOW, fires the next command while the chip is still busy, and the chip silently drops it. First `lora.tx()` after a clean boot on Seeed Wio Tracker L1 hangs ~50% of the time.
+
+## Authority
+
+- [SX1261/2 datasheet, DS.SX1261-2.W.APP Rev. 1.2](https://cdn.sparkfun.com/assets/6/b/5/1/4/SX1262_datasheet.pdf) §8.3.1
+  "BUSY Control Line": *"it is essential to wait for the BUSY line to
+  go low before sending an SPI command."*
+- [LR1121 User Manual, UM.LR1121.W.APP Rev. 1.2](https://files.waveshare.com/wiki/Core1121/UserManual_LR1121_v1_2.pdf) §3
+  "Host-Controller Interface": *"it is necessary to check the status
+  of BUSY prior to sending a command."* (Applies to the LR11xx family
+  — see also [LR1110 DS Rev. 1.1](https://download.mikroe.com/documents/datasheets/LR1110_datasheet.pdf) §1.2.5.)
+- [RadioLib](https://github.com/jgromes/RadioLib/blob/cffd5af/src/Module.cpp)
+  `Module::SPIwriteStream` / `SPIreadStream` call `waitForBusy()` at
+  the start of every transaction.
+- The [SX1276/77/78/79 datasheet](https://cdn.sparkfun.com/assets/7/7/3/2/2/SX1276_Datasheet.pdf)
+  Table 2 exposes no BUSY pin, so
+  `GenericSx127xInterfaceVariant::wait_on_busy` stays a no-op and the
+  change is behaviorally identical for SX127x.
+
+## Fix
+
+Replace the post-command BUSY wait with a pre-command BUSY check at the start of each `SpiInterface` / `Lr1110SpiInterface` read/write method. Drop the redundant explicit `wait_on_busy()` calls in `sx126x` (after Calibrate, `ensure_ready` non-sleep arm) and `lr1110::mod` (4 regmem/bootloader sites) — all now covered by the interface pre-wait.
+
+The `is_sleep_command` flag keeps its name but now gates the pre-wait; set `true` only when BUSY is held HIGH by design (the wake-from-sleep GetStatus pulse in `sx126x::ensure_ready`). Two callsite flips as a result: `ensure_ready` Sleep arm `false`→`true`; `set_sleep` `true`→`false`.
+
+No public API signature changes.
+
+## Test
+
+- `cargo clippy -p lora-phy --features defmt-03 -- -D warnings` clean.
+- Hardware: Seeed Wio Tracker L1 (nRF52840 + SX1262), 20 consecutive
+  clean-boot TX cycles → 20/20 (vs ~50% before).
+```
+
+---
+
 ## Drop `[patch.crates-io]` + upgrade esp-hal / esp-rtos + add `esp_app_desc!()` + bump espflash to v4
 
 Single coordinated change that clears our last remaining dep-graph debt
