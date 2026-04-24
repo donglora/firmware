@@ -8,8 +8,11 @@ pointing at `../../lora-rs/lora-phy`; drop the patch line + pre-release
 selector once upstream releases.
 
 Hardware-verified on Wio Tracker L1: 20/20 clean-boot TX after the fix
-(vs ~50% before). Additive fix: adds pre-command BUSY check, keeps
-existing post-command wait in place.
+(vs ~50% before). Adds a pre-command BUSY check before each
+SpiInterface read/write op, keeping the existing post-command wait in
+place. Belt-and-suspenders bracketing: pre-wait per spec, post-wait
+closes the BUSY-assertion latency window (T_SW ≤ 600 ns) that a
+single level-poll can miss.
 
 ### PR body
 
@@ -44,9 +47,27 @@ On fast MCUs (nRF52840 at 64 MHz, release build) this is racy — `embedded-hal-
 
 ## Fix
 
-Replace the post-command BUSY wait with a pre-command BUSY check at the start of each `SpiInterface` / `Lr1110SpiInterface` read/write method. Drop the redundant explicit `wait_on_busy()` calls in `sx126x` (after Calibrate, `ensure_ready` non-sleep arm) and `lr1110::mod` (4 regmem/bootloader sites) — all now covered by the interface pre-wait.
+Bracket each `SpiInterface` / `Lr1110SpiInterface` read/write op with
+both a pre- and post-command BUSY wait. The pre-wait is the new
+addition required by the spec; the existing post-wait is preserved as
+the belt that closes the BUSY-assertion latency window.
 
-The `is_sleep_command` flag keeps its name but now gates the pre-wait; set `true` only when BUSY is held HIGH by design (the wake-from-sleep GetStatus pulse in `sx126x::ensure_ready`). Two callsite flips as a result: `ensure_ready` Sleep arm `false`→`true`; `set_sleep` `true`→`false`.
+Why pre-wait alone isn't enough: `embedded-hal-async`'s
+`wait_for_low` returns immediately when the pin is already low. The
+chip takes up to T_SW ns to assert BUSY after NSS rises, so a single
+polling chance — at any side of the SPI op — can see a stale LOW and
+race the next command into a still-busy chip. The repro is
+back-to-back writes inside `sx126x::do_cad` (SetCADParams immediately
+followed by SetCAD): pre-wait alone races, SetCAD is dropped, CADDone
+never fires, `lora.cad()` hangs forever. Keeping the post-wait gives a
+second polling chance after enough time has elapsed for BUSY to be
+reliably observable.
+
+The `is_sleep_command` flag now gates both waits. One callsite flip:
+`sx126x::ensure_ready`'s wake-from-sleep GetStatus pulse passes
+`is_sleep_command=true` so the pre-wait doesn't hang on the
+BUSY-stuck-HIGH chip-asleep state. The next SPI op's pre-wait absorbs
+the wake-completion latency.
 
 No public API signature changes.
 

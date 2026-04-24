@@ -47,7 +47,11 @@ use crate::protocol::{
     SetConfigResultCode, TxDonePayload, TxResult, MAX_OTA_PAYLOAD,
 };
 
-const CAD_MAX_RETRIES: u8 = 10;
+// LBT retry timing lives in `crate::lbt` — the math is pure and
+// host-testable, so it's split out of this (HW-gated) module.
+use crate::lbt::{
+    cad_retries, jittered_sleep_us, toa_us, CAD_ASSUMED_PEER_PAYLOAD_B, CAD_BUDGET_US,
+};
 
 type LoRaDriver = LoRa<RadioDriver, Delay>;
 
@@ -152,6 +156,11 @@ pub struct RadioContext {
     /// `ResumingRx`. Reset on any `StartRxOk`. See `MAX_RESUME_RETRIES`
     /// for the limit before falling through to `Idle`.
     pub resume_retries: u8,
+    /// Per-CAD-retry sleep in microseconds: time-on-air for a
+    /// `CAD_ASSUMED_PEER_PAYLOAD_B`-byte packet under the current
+    /// config. Recomputed on every successful `SET_CONFIG`; `0` while
+    /// `Unconfigured` (the CAD path is unreachable without a config).
+    pub cad_retry_delay_us: u32,
 }
 
 impl RadioContext {
@@ -259,7 +268,7 @@ statechart! {
                 default(TransmittingFromIdle);
 
                 state TransmittingFromIdle {
-                    during: perform_tx(lora, pending_tx);
+                    during: perform_tx(lora, pending_tx, cad_retry_delay_us);
                     on(TransmitDone { airtime_us: u32 }) => respond_tx_done;
                     on(TransmitDone) => Idle;
                     on(ChannelBusy) => respond_tx_channel_busy, Idle;
@@ -267,7 +276,7 @@ statechart! {
                 }
 
                 state TransmittingFromRx {
-                    during: perform_tx(lora, pending_tx);
+                    during: perform_tx(lora, pending_tx, cad_retry_delay_us);
                     on(TransmitDone { airtime_us: u32 }) => respond_tx_done;
                     on(TransmitDone) => ResumingRx;
                     // Even on failure, we were receiving before the TX —
@@ -368,14 +377,23 @@ async fn next_packet(
     }
 }
 
-async fn perform_tx(lora: &mut LoRaDriver, pending: &mut Option<PendingTx>) -> RadioInput {
+async fn perform_tx(
+    lora: &mut LoRaDriver,
+    pending: &mut Option<PendingTx>,
+    cad_retry_delay_us: &mut u32,
+) -> RadioInput {
     #[cfg(feature = "debug-checkpoint")]
     crate::debug_blink::set(6);
     let Some(tx) = pending.take() else {
         return RadioInput::TransmitFailed;
     };
+    // Scale CAD retry count to the cached per-retry sleep: fewer retries
+    // when each one-full-packet wait is expensive (slow SFs). When the
+    // one-packet wait exceeds the total budget, the helper returns
+    // `retries = 1` — a single CAD, bail on busy, no sleep.
+    let (retries, sleep_us) = cad_retries(*cad_retry_delay_us);
     let start = Instant::now();
-    match do_tx(lora, &tx).await {
+    match do_tx(lora, &tx, retries, sleep_us).await {
         Ok(TxOutcome::Transmitted) => RadioInput::TransmitDone {
             airtime_us: Instant::now().duration_since(start).as_micros() as u32,
         },
@@ -427,11 +445,20 @@ impl RadioActions for RadioActionContext<'_> {
                 if let Err(_e) = reconfigure_radio(&mut self.lora, &cfg).await {
                     // Hardware failure: drop to Unconfigured (spec §6.3).
                     self.config = None;
+                    self.cad_retry_delay_us = 0;
                     self.send(tag, DeviceMessage::Err(ErrorCode::ERadio)).await;
                     let _ = self.emit(RadioInput::ConfigFailedRadio);
                     return;
                 }
                 self.config = Some(cfg);
+                self.cad_retry_delay_us = toa_us(&cfg, CAD_ASSUMED_PEER_PAYLOAD_B);
+                if self.cad_retry_delay_us > CAD_BUDGET_US {
+                    defmt::debug!(
+                        "LBT degraded: assumed-packet ToA {=u32} us > budget {=u32} us; single-CAD-and-bail",
+                        self.cad_retry_delay_us,
+                        CAD_BUDGET_US
+                    );
+                }
                 self.packets_dropped = 0;
                 self.announce(RadioEvent::ConfigChanged(cfg));
                 let result = SetConfigResult {
@@ -707,7 +734,12 @@ async fn reconfigure_radio(lora: &mut LoRaDriver, cfg: &LoRaConfig) -> Result<()
     Ok(())
 }
 
-async fn do_tx(lora: &mut LoRaDriver, tx: &PendingTx) -> Result<TxOutcome, RadioError> {
+async fn do_tx(
+    lora: &mut LoRaDriver,
+    tx: &PendingTx,
+    retries: u8,
+    sleep_us: u32,
+) -> Result<TxOutcome, RadioError> {
     let mdltn = to_lora_mod_params(lora, &tx.config)?;
 
     if !tx.skip_cad {
@@ -719,13 +751,22 @@ async fn do_tx(lora: &mut LoRaDriver, tx: &PendingTx) -> Result<TxOutcome, Radio
         #[cfg(feature = "debug-checkpoint")]
         crate::debug_blink::set(19);
         let mut saw_activity = false;
-        for _ in 0..CAD_MAX_RETRIES {
+        for i in 0..retries {
             if !lora.cad(&mdltn).await? {
                 saw_activity = false;
                 break;
             }
             saw_activity = true;
-            embassy_time::Timer::after_millis(10).await;
+            // Skip the trailing sleep: if the last CAD was busy, we're
+            // about to return ChannelBusy, so sleeping + re-preparing
+            // is wasted work.
+            if i + 1 == retries {
+                break;
+            }
+            let entropy = embassy_time::Instant::now().as_ticks() as u32;
+            let jittered_us = jittered_sleep_us(sleep_us, entropy);
+            embassy_time::Timer::after(embassy_time::Duration::from_micros(jittered_us as u64))
+                .await;
             lora.prepare_for_cad(&mdltn).await?;
         }
         if saw_activity {
@@ -830,6 +871,7 @@ pub async fn radio_task(
         last_tx_tag: None,
         pending_rx_start_tag: None,
         resume_retries: 0,
+        cad_retry_delay_us: 0,
     };
 
     static RADIO_INTERNAL_CH: embassy_sync::channel::Channel<

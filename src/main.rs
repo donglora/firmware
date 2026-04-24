@@ -29,6 +29,7 @@ mod driver;
 mod hal;
 #[cfg(not(test))]
 mod host;
+mod lbt;
 mod protocol;
 #[cfg(not(test))]
 mod radio;

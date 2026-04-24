@@ -1733,6 +1733,7 @@ dependencies = [
 [[package]]
 name = "lora-modulation"
 version = "0.1.5"
+source = "git+https://github.com/swaits/lora-rs.git?branch=fix%2Fsx126x-busy-race#f9ebb303a7029cbc3f19f0760ae164946000b152"
 dependencies = [
  "defmt 0.3.100",
 ]
@@ -1740,6 +1741,7 @@ dependencies = [
 [[package]]
 name = "lora-phy"
 version = "3.0.2-alpha"
+source = "git+https://github.com/swaits/lora-rs.git?branch=fix%2Fsx126x-busy-race#f9ebb303a7029cbc3f19f0760ae164946000b152"
 dependencies = [
  "defmt 0.3.100",
  "document-features",
@@ -1753,6 +1755,7 @@ dependencies = [
 [[package]]
 name = "lorawan"
 version = "0.9.1"
+source = "git+https://github.com/swaits/lora-rs.git?branch=fix%2Fsx126x-busy-race#f9ebb303a7029cbc3f19f0760ae164946000b152"
 dependencies = [
  "aes",
  "cmac",
@@ -1764,6 +1767,7 @@ dependencies = [
 [[package]]
 name = "lorawan-device"
 version = "0.12.2"
+source = "git+https://github.com/swaits/lora-rs.git?branch=fix%2Fsx126x-busy-race#f9ebb303a7029cbc3f19f0760ae164946000b152"
 dependencies = [
  "defmt 0.3.100",
  "document-features",
@@ -1778,6 +1782,7 @@ dependencies = [
 [[package]]
 name = "lorawan-macros"
 version = "0.1.0"
+source = "git+https://github.com/swaits/lora-rs.git?branch=fix%2Fsx126x-busy-race#f9ebb303a7029cbc3f19f0760ae164946000b152"
 dependencies = [
  "proc-macro2",
  "quote",
