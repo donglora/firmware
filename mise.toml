@@ -2,11 +2,11 @@
 just = "latest"
 
 # Cargo-installed tooling via mise's `cargo:` backend.
-"cargo:cargo-binutils"   = "latest"  # rust-objcopy, rust-size
-"cargo:cargo-hex-to-uf2" = "latest"  # ELF → UF2 for nRF52 / RP2040 DFU drives
-"cargo:espup"            = "0.16"    # bootstraps the ESP Xtensa toolchain
-"cargo:espflash"         = "3"       # flash + save-image for ESP targets
-"cargo:probe-rs-tools"   = "0.31"    # debug-probe flash/run for ARM targets
+"cargo:cargo-binutils" = "latest"   # rust-objcopy, rust-size
+"cargo:cargo-hex-to-uf2" = "latest" # ELF → UF2 for nRF52 / RP2040 DFU drives
+"cargo:espup" = "latest"            # bootstraps the ESP Xtensa toolchain
+"cargo:espflash" = "3"              # flash + save-image for ESP targets (4.x requires esp_app_desc!() in app — revisit alongside esp-hal 1.1+ / drop-the-patches cleanup)
+"cargo:probe-rs-tools" = "latest"   # debug-probe flash/run for ARM targets
 
 # Stable Rust + cross-compile targets. Targets land under $RUSTUP_HOME for
 # the pinned toolchain, so they're always available under `mise exec` — no
@@ -15,8 +15,10 @@ just = "latest"
 # Xtensa ESP targets are NOT listed here — they use the self-contained `esp`
 # toolchain installed out-of-band by `espup` (see `just setup`). That
 # toolchain ships its own rust-src for `-Zbuild-std`.
+#
+# profile = "minimal" (just rustc, rust-std, cargo), "default" (adds rust-docs, rustfmt, clippy)
+#
 [tools.rust]
-version    = "1.94"
-profile    = "default"
-components = "clippy"
-targets    = "thumbv6m-none-eabi,thumbv7em-none-eabihf"
+version = "1.94"
+profile = "default"
+targets = "thumbv6m-none-eabi,thumbv7em-none-eabihf"
