@@ -37,6 +37,12 @@ impl<I: I2c> Sh1106<I> {
     /// Send a sequence of commands (each prefixed with the I2C command byte 0x00).
     async fn cmd(&mut self, commands: &[u8]) -> Result<(), I::Error> {
         for &c in commands {
+            #[cfg(feature = "debug-twim")]
+            defmt::info!(
+                "[sh1106] cmd write: addr=0x{=u8:02X} bytes=[0x00, 0x{=u8:02X}]",
+                self.addr,
+                c,
+            );
             self.i2c.write(self.addr, &[0x00, c]).await?;
         }
         Ok(())
@@ -44,6 +50,8 @@ impl<I: I2c> Sh1106<I> {
 
     /// Initialize the display with sensible defaults.
     pub async fn init(&mut self) -> Result<(), I::Error> {
+        #[cfg(feature = "debug-twim")]
+        defmt::info!("[sh1106] init: starting");
         self.cmd(&[
             0xAE, // display off
             0xD5, 0x80, // clock div: default
@@ -71,6 +79,8 @@ impl<I: I2c> Sh1106<I> {
         page_buf[0] = 0x40;
 
         for page in 0..PAGES {
+            #[cfg(feature = "debug-twim")]
+            defmt::info!("[sh1106] flush page {=usize}: addr cmds (3 bytes)", page);
             // Set page address and column start (with SH1106 2-column offset).
             self.cmd(&[
                 0xB0 | page as u8,        // page address
@@ -81,6 +91,12 @@ impl<I: I2c> Sh1106<I> {
 
             let start = page * WIDTH;
             page_buf[1..].copy_from_slice(&self.buffer[start..start + WIDTH]);
+            #[cfg(feature = "debug-twim")]
+            defmt::info!(
+                "[sh1106] flush page {=usize}: data write {=usize} bytes (0x40 prefix + 128 pixels)",
+                page,
+                page_buf.len(),
+            );
             self.i2c.write(self.addr, &page_buf).await?;
         }
         Ok(())
@@ -88,6 +104,8 @@ impl<I: I2c> Sh1106<I> {
 
     /// Set display brightness (contrast).
     pub async fn set_brightness(&mut self, value: u8) -> Result<(), I::Error> {
+        #[cfg(feature = "debug-twim")]
+        defmt::info!("[sh1106] set_brightness: 0x{=u8:02X}", value);
         self.cmd(&[0x81, value]).await
     }
 }

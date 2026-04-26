@@ -84,6 +84,15 @@ cfg_if::cfg_if! {
 #[cfg(not(test))]
 async fn run(spawner: Spawner) {
     let board = <board::Board as LoRaBoard>::init();
+
+    // Read + log + clear POWER.RESETREAS before any other boot output so
+    // the cause of the *previous* reset (if any) lands at the very top
+    // of the RTT log. Critical for soak-debugging silent crash-reboots:
+    // a self-rebooting firmware otherwise looks like the log just
+    // restarted with no explanation. nRF52840-only.
+    #[cfg(any(feature = "rak_wisblock_4631", feature = "wio_tracker_l1"))]
+    crate::hal::nrf52840::dump_reset_reason();
+
     let parts = board.into_parts();
 
     // Build the GET_INFO struct once at boot. This is the authoritative

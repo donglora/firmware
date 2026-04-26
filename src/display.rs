@@ -237,6 +237,8 @@ statechart! {
     Display {
         context: DisplayContext;
         events: DisplayEvent;
+        // Auto-trace — backend selected by `hsmc/trace-*` cargo feature.
+        trace;
         default(On);
 
         state Off {

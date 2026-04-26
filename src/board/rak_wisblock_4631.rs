@@ -22,11 +22,18 @@ pub type UsbDriver = mcu::UsbNrfDriver;
 pub type DisplayI2c = mcu::I2cBus;
 pub type LedDriver = crate::driver::simple_led::SimpleLed<Output<'static>>;
 
-pub type DisplayDriver = ssd1306::Ssd1306Async<
-    ssd1306::prelude::I2CInterface<DisplayI2c>,
-    ssd1306::size::DisplaySize128x64,
-    ssd1306::mode::BufferedGraphicsModeAsync<ssd1306::size::DisplaySize128x64>,
->;
+// SH1106 hand-rolled driver instead of the ssd1306 crate. The RAK1921
+// OLED ships under various Chinese-OEM packaging (e.g. JMD0.96C) that
+// can be either SSD1306 or SH1106 silicon — physically and pin
+// identical, but use different addressing modes. The bigger reason
+// though: ssd1306 0.10's display-interface-i2c emits I2C transaction
+// patterns (consecutive writes, 3+ ops) that embassy_nrf::twim's
+// `unreachable!()` rejects, so even on real SSD1306 silicon the panic
+// would fire. Our hand-rolled SH1106 driver issues only single writes
+// per logical op and is twim-safe. SH1106 init opcodes are similar
+// enough that real SSD1306 silicon mostly works (worst case: mirrored
+// display until proper runtime detection lands).
+pub type DisplayDriver = crate::driver::sh1106::Sh1106<DisplayI2c>;
 
 // ── Peripheral bundles ──────────────────────────────────────────────
 
@@ -46,22 +53,29 @@ pub struct DisplayParts {
 // ── Display init ────────────────────────────────────────────────────
 
 pub async fn create_display(i2c: DisplayI2c) -> Option<DisplayDriver> {
-    use ssd1306::mode::DisplayConfigAsync;
-    use ssd1306::prelude::{Brightness, DisplayRotation};
-    use ssd1306::size::DisplaySize128x64;
-    use ssd1306::{I2CDisplayInterface, Ssd1306Async};
+    let mut display = crate::driver::sh1106::Sh1106::new(i2c, 0x3C);
 
-    let interface = I2CDisplayInterface::new(i2c);
-    let mut display = Ssd1306Async::new(interface, DisplaySize128x64, DisplayRotation::Rotate0)
-        .into_buffered_graphics_mode();
-
-    embassy_time::Timer::after_millis(100).await;
-    if display.init().await.is_err() {
-        defmt::error!("SSD1306 display init failed");
-        return None;
+    // Retry 3× with 100ms backoff. The SH1106's first transaction
+    // after power-on can return Err if the chip's internal voltage
+    // converter hasn't fully settled — observed empirically on
+    // RAK4631/RAK1921. Each attempt is independent (full init
+    // sequence). Display works visibly even if the FIRST attempt
+    // failed, because subsequent attempts succeed.
+    for attempt in 0..3u8 {
+        embassy_time::Timer::after_millis(100).await;
+        if display.init().await.is_ok() {
+            let _ = display.set_brightness(0xFF).await;
+            return Some(display);
+        }
+        if attempt < 2 {
+            defmt::warn!(
+                "SH1106 display init attempt {=u8}/3 failed; retrying",
+                attempt + 1
+            );
+        }
     }
-    let _ = display.set_brightness(Brightness::BRIGHTEST).await;
-    Some(display)
+    defmt::error!("SH1106 display init failed after 3 attempts");
+    None
 }
 
 // ── Board init ──────────────────────────────────────────────────────

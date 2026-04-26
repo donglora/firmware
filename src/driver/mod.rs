@@ -1,7 +1,8 @@
 #[cfg(any(
     feature = "wio_tracker_l1",
     feature = "elecrow_thinknode_m2",
-    feature = "lilygo_tbeam_supreme"
+    feature = "lilygo_tbeam_supreme",
+    feature = "rak_wisblock_4631"
 ))]
 pub mod sh1106;
 
@@ -67,7 +68,8 @@ where
 #[cfg(any(
     feature = "wio_tracker_l1",
     feature = "elecrow_thinknode_m2",
-    feature = "lilygo_tbeam_supreme"
+    feature = "lilygo_tbeam_supreme",
+    feature = "rak_wisblock_4631"
 ))]
 impl<I> DisplayBrightness for sh1106::Sh1106<I>
 where

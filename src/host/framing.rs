@@ -54,7 +54,16 @@ pub async fn dispatch_frame(
 }
 
 /// Emit an async framing error (tag = 0x0000) per spec §2.5.
+///
+/// Backpressure: if the host transport's IN endpoint is observed-dead
+/// (RADIO_THROTTLED set by host_task), drop silently. Without this gate,
+/// a bad-frame burst from a wedged host fills `OutboundChannel` faster
+/// than host_task can drain it (because it can't drain it at all when
+/// write_packet keeps failing), producing the warn flood seen in soak.
 pub async fn emit_async_err(outbound: &OutboundChannel, code: ErrorCode) {
+    if crate::channel::RADIO_THROTTLED.load(portable_atomic::Ordering::Acquire) {
+        return;
+    }
     let frame = OutboundFrame {
         tag: 0,
         msg: DeviceMessage::Err(code),
@@ -106,15 +115,31 @@ pub fn encode_outbound(frame: &OutboundFrame, out: &mut [u8; MAX_WIRE_FRAME]) ->
     ) {
         Ok(n) => Some(n),
         Err(FrameEncodeError::BufferTooSmall) => {
-            warn!("encode_frame: output buffer too small");
+            warn!(
+                "encode_frame: output buffer too small (type={=u8}, tag={=u16}, payload={=usize}B, out_buf={=usize}B)",
+                frame.msg.type_id(),
+                frame.tag,
+                payload_len,
+                out.len(),
+            );
             None
         }
         Err(FrameEncodeError::PayloadTooLarge) => {
-            warn!("encode_frame: payload exceeds MAX_PAYLOAD_FIELD");
+            warn!(
+                "encode_frame: payload exceeds MAX_PAYLOAD_FIELD (type={=u8}, tag={=u16}, payload={=usize}B)",
+                frame.msg.type_id(),
+                frame.tag,
+                payload_len,
+            );
             None
         }
         Err(FrameEncodeError::CobsEncode) => {
-            warn!("encode_frame: COBS encode refused");
+            warn!(
+                "encode_frame: COBS encode refused (type={=u8}, tag={=u16}, payload={=usize}B)",
+                frame.msg.type_id(),
+                frame.tag,
+                payload_len,
+            );
             None
         }
     }

@@ -82,11 +82,47 @@ flash board extra_features="":
 
 # Flash ARM board via debug probe (requires J-Link or similar).
 # `extra_features` is passed through to the build.
+# Sets DEFMT_LOG at build time so defmt::info!/warn!/error! are actually
+# compiled in (default filter is ERROR-only — strips info logs).
+# `embassy_usb=error` silences the benign Linux modem-manager
+# `SET_INTERFACE: alt setting out of range` WARN that fires once per
+# enumeration; it's a normal STALL response (correct USB behavior),
+# the WARN is just embassy_usb noise. Other crates inherit the `info`
+# default so chart traces, our own info!/warn!/error! all still fire.
 flash-probe board extra_features="":
     @just _ensure_tools
-    @just build {{board}} release "{{extra_features}}"
+    @DEFMT_LOG=info,embassy_usb=error just build {{board}} release "{{extra_features}}"
     @set -- $(just _info {{board}}); feat=$1; target=$2; chip=$3; \
     probe-rs run --chip $chip "{{builds_dir}}/donglora-{{board}}-v{{version}}.elf"
+
+# UF2-flash via the bootloader, then probe-rs attach for RTT log streaming.
+# Required on boards (e.g. RAK4631) where the bootloader gates the app
+# behind a "valid app flag" in its settings page that only the bootloader
+# itself can set — `probe-rs run`'s direct SWD writes bypass that flag and
+# leave the bootloader stuck in DFU mode. UF2 path goes through the
+# bootloader, sets the flag, then we attach for RTT (no reset, no reflash).
+flash-attach board extra_features="":
+    @just _ensure_tools
+    @DEFMT_LOG=info,embassy_usb=error just build {{board}} release "{{extra_features}}"
+    @just _flash_uf2 {{board}}
+    @set -- $(just _info {{board}}); feat=$1; target=$2; chip=$3; \
+    sleep 1; \
+    probe-rs attach --chip $chip --no-catch-reset \
+      "{{builds_dir}}/donglora-{{board}}-v{{version}}.elf"
+
+# Attach probe-rs for live RTT/defmt streaming WITHOUT flashing or
+# resetting the chip. Logs are tee'd to a UTC-timestamped file in /tmp
+# so soak captures don't clobber each other across runs. Use this with
+# the dongle already running the desired firmware (flash via `just flash`
+# or `just flash-attach` first).
+attach board:
+    @just _ensure_tools
+    @set -- $(just _info {{board}}); feat=$1; target=$2; chip=$3; \
+    log="/tmp/donglora-soak-$(date -u +%Y%m%dT%H%M%SZ).log"; \
+    echo "Logging to $log"; \
+    probe-rs attach --chip $chip --no-catch-reset \
+      "{{builds_dir}}/donglora-{{board}}-v{{version}}.elf" 2>&1 \
+      | tee "$log"
 
 # Show binary size for a release build
 size board:
