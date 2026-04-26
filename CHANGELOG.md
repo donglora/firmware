@@ -7,6 +7,96 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-04-25
+
+### Added
+
+- **RAK4631 WisBlock board support** (nRF52840 + SX1262, RAK19007 base
+  + RAK4631 Core + RAK1921 OLED). The second nRF52840 + SX1262 board
+  alongside the Wio Tracker L1.
+  - `SX126X_POWER_EN` (P1.05) driven HIGH at init — the radio is
+    power-gated on this module; without this the chip has no power
+    and SPI hangs.
+  - HFXO + LFXO external crystals selected in `embassy_nrf::Config`.
+    USB CDC-ACM needs ±500 ppm which the internal RC oscillator
+    can't provide.
+  - `SoftwareVbusDetect(true, true)` so USB enumerates without a
+    `CLOCK_POWER` interrupt handler.
+  - Green LED on P1.03 (RAK19007 Base LED1, active-HIGH) via
+    `SimpleLed`.
+  - Hardware-validated end-to-end: ADVERT round-trip with an external
+    receiver on US915.
+  - Added `debug-checkpoint` blink-map coverage at every TX-phase
+    boundary in `radio.rs`, including a new checkpoint between
+    `prepare_for_cad` and `cad()` so future bring-ups can distinguish
+    a modem-setup hang from a DIO1-wait hang.
+
+- **Adaptive listen-before-talk.** The CAD pre-TX retry loop scales to
+  the active LoRa config instead of running a fixed 10 retries × 10 ms
+  (which was roughly one max-length packet at SF7/BW500 and a no-op at
+  SF12/BW125).
+  - Per-retry sleep is sized to the time-on-air of an assumed-peer
+    80-byte packet under the current SF/BW/CR — cached on
+    `RadioContext`, recomputed on every `SET_CONFIG`.
+  - Retry count = `clamp(floor(BUDGET/T)+1, 1, 10)` with `BUDGET = 2.5
+    s`. Fast configs still get up to 10 retries; SF11/12 degrade to
+    single-CAD-and-bail (logged at config-apply).
+  - Sleeps jittered ±20% per iteration to decorrelate
+    simultaneously-backing-off contenders.
+  - ToA math, CR→{1..4} mapping, retry-count derivation, and jitter
+    helper live in a pure `src/lbt.rs` module — host-testable via
+    `DONGLORA_HOST_TEST=1 cargo test` (13 tests).
+  - Validated on-device: 20 iterations of the AI Bot test flow that
+    previously saw ~2 `ChannelBusy` errors now sees zero at the same
+    SF/BW.
+
+### Fixed
+
+- **First-TX-after-boot reliability on SX1262 boards.** Picked up the
+  upstream `lora-phy` fix that moves the BUSY-handshake check from
+  *after* to *before* each SPI op, per Semtech SX1261/2 §8.3.1, LR1121
+  UM §3, and LR1110 DS §1.2.5. The existing post-op wait is preserved
+  as the belt that closes the BUSY-assertion latency window
+  (T_SW ≤ 600 ns) that a single level-poll can miss. Consumed via
+  `[patch.crates-io]` against `swaits/lora-rs#fix/sx126x-busy-race`
+  until the upstream PR merges.
+  - Hardware-verified on Seeed Wio Tracker L1: 20/20 clean-boot TX
+    (vs ~50% before).
+  - Renames `InterfaceVariant::wait_on_busy` → `wait_until_ready` to
+    match the new semantics.
+- **BUSY pin pull-down → none on nRF SX1262 boards.** SX1262's BUSY
+  pin has an internal 20 kΩ pull-up (datasheet p. 53); our
+  `Input::new(..., Pull::Down)` was contending with it, leaving BUSY
+  at an indeterminate voltage and intermittently mis-reading the
+  chip's ready state. Per `lora-rs/lora-rs#260`, switched to
+  `Pull::None` on both Wio Tracker L1 and RAK4631. The RAK4631
+  appeared to work before, but was affected by the same class of bug
+  per the upstream issue — now deterministically correct rather than
+  "happens to work".
+
+### Changed
+
+- **Build-system DX.** `just flash`, `just flash-probe`, and
+  `just build` accept an optional comma-separated `extra_features`
+  argument that is appended to the board feature, e.g. `just flash
+  wio_tracker_l1 debug-checkpoint`. No more dropping to raw
+  `cargo + rust-objcopy + uf2 cp` for iteration loops.
+- **`just` recipes now resolve all tools through `mise`** via
+  `set shell := ["mise", "exec", "--", "sh", "-c"]`. `cargo`,
+  `espflash`, `rust-objcopy`, `cargo-hex-to-uf2` etc. always pick up
+  the versions pinned in `mise.toml` regardless of `PATH` ordering.
+- **`mise.toml` rust pins now carry ARM targets + clippy**, so a fresh
+  `mise install` is sufficient bootstrapping — no manual
+  `rustup target add` for `thumbv6m-none-eabi` /
+  `thumbv7em-none-eabihf` and no separate clippy install.
+- **New `just flash-dfu` recipe** for the Adafruit nRF52 bootloader
+  (VID:PID `239a:0029`) via `adafruit-nrfutil` under `uvx`, with port
+  autodetect.
+- **Per-board `_info` chain in the justfile** collapsed from a long
+  per-board `if/elif` ladder + per-board `:=` variables into a single
+  `case` statement — one place per board, two lists (names +
+  metadata).
+
 ## [1.3.1] - 2026-04-23
 
 ### Fixed

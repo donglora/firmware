@@ -1,82 +1,30 @@
 # Firmware TODO List
 
-## `lora-phy` fix shipped locally; upstream PR pending submission
+## `lora-phy` fix: drop fork pin once PR #428 merges + releases
 
-Branch: [`swaits/lora-rs @ fix/sx126x-busy-race`](https://github.com/swaits/lora-rs/tree/fix/sx126x-busy-race).
-PR not yet opened. Firmware consumes the fix via `[patch.crates-io]`
-pointing at `../../lora-rs/lora-phy`; drop the patch line + pre-release
-selector once upstream releases.
+Upstream PR: [lora-rs/lora-rs#428 — *phy: add pre-command BUSY checks
+per Semtech datasheets*](https://github.com/lora-rs/lora-rs/pull/428)
+(open).
+Fork branch we ship from:
+[`swaits/lora-rs @ fix/sx126x-busy-race`](https://github.com/swaits/lora-rs/tree/fix/sx126x-busy-race).
+
+Firmware consumes the fix via a direct `git` dependency in
+`Cargo.toml`:
+
+```toml
+lora-phy = { git = "https://github.com/swaits/lora-rs.git", branch = "fix/sx126x-busy-race", features = ["defmt-03"] }
+```
+
+When PR #428 merges and a `lora-phy` release ships on crates.io that
+contains it, switch this line back to a normal `lora-phy = "X.Y"`
+crates.io version and drop the explanatory comment block above it.
 
 Hardware-verified on Wio Tracker L1: 20/20 clean-boot TX after the fix
-(vs ~50% before). Adds a pre-command BUSY check before each
-SpiInterface read/write op, keeping the existing post-command wait in
-place. Belt-and-suspenders bracketing: pre-wait per spec, post-wait
-closes the BUSY-assertion latency window (T_SW ≤ 600 ns) that a
-single level-poll can miss.
-
-### PR body
-
-```
-Title: phy: pre-command BUSY check per Semtech datasheets
-
-## Problem
-
-While bringing up a downstream project (donglora), I hit a race where TX commands would occasionally fail. Tracked it down to lora-phy not following the BUSY-handshake algorithm Semtech recommends: the host should wait on BUSY *before* issuing each command, not after.
-
-Details: `SpiInterface::{write, write_with_payload, read,
-read_with_status}` polls BUSY *after* each SPI op.
-
-On fast MCUs (nRF52840 at 64 MHz, release build) this is racy — `embedded-hal-async`'s `wait_for_low` returns immediately if the pin is already low, and the chip takes up to T_SW ns (SX1261/2 §8.3, Fig. 8-3) to assert BUSY after NSS rises. The host polls inside that pre-assertion window, sees a stale LOW, fires the next command while the chip is still busy, and the chip silently drops it. First `lora.tx()` after a clean boot on Seeed Wio Tracker L1 hangs ~50% of the time.
-
-## Authority
-
-- [SX1261/2 datasheet, DS.SX1261-2.W.APP Rev. 1.2](https://cdn.sparkfun.com/assets/6/b/5/1/4/SX1262_datasheet.pdf) §8.3.1
-  "BUSY Control Line": *"it is essential to wait for the BUSY line to
-  go low before sending an SPI command."*
-- [LR1121 User Manual, UM.LR1121.W.APP Rev. 1.2](https://files.waveshare.com/wiki/Core1121/UserManual_LR1121_v1_2.pdf) §3
-  "Host-Controller Interface": *"it is necessary to check the status
-  of BUSY prior to sending a command."* (Applies to the LR11xx family
-  — see also [LR1110 DS Rev. 1.1](https://download.mikroe.com/documents/datasheets/LR1110_datasheet.pdf) §1.2.5.)
-- [RadioLib](https://github.com/jgromes/RadioLib/blob/cffd5af/src/Module.cpp)
-  `Module::SPIwriteStream` / `SPIreadStream` call `waitForBusy()` at
-  the start of every transaction.
-- The [SX1276/77/78/79 datasheet](https://cdn.sparkfun.com/assets/7/7/3/2/2/SX1276_Datasheet.pdf)
-  Table 2 exposes no BUSY pin, so
-  `GenericSx127xInterfaceVariant::wait_on_busy` stays a no-op and the
-  change is behaviorally identical for SX127x.
-
-## Fix
-
-Bracket each `SpiInterface` / `Lr1110SpiInterface` read/write op with
-both a pre- and post-command BUSY wait. The pre-wait is the new
-addition required by the spec; the existing post-wait is preserved as
-the belt that closes the BUSY-assertion latency window.
-
-Why pre-wait alone isn't enough: `embedded-hal-async`'s
-`wait_for_low` returns immediately when the pin is already low. The
-chip takes up to T_SW ns to assert BUSY after NSS rises, so a single
-polling chance — at any side of the SPI op — can see a stale LOW and
-race the next command into a still-busy chip. The repro is
-back-to-back writes inside `sx126x::do_cad` (SetCADParams immediately
-followed by SetCAD): pre-wait alone races, SetCAD is dropped, CADDone
-never fires, `lora.cad()` hangs forever. Keeping the post-wait gives a
-second polling chance after enough time has elapsed for BUSY to be
-reliably observable.
-
-The `is_sleep_command` flag now gates both waits. One callsite flip:
-`sx126x::ensure_ready`'s wake-from-sleep GetStatus pulse passes
-`is_sleep_command=true` so the pre-wait doesn't hang on the
-BUSY-stuck-HIGH chip-asleep state. The next SPI op's pre-wait absorbs
-the wake-completion latency.
-
-No public API signature changes.
-
-## Test
-
-- `cargo clippy -p lora-phy --features defmt-03 -- -D warnings` clean.
-- Hardware: Seeed Wio Tracker L1 (nRF52840 + SX1262), 20 consecutive
-  clean-boot TX cycles → 20/20 (vs ~50% before).
-```
+(vs ~50% before). The fix adds a pre-command BUSY check before each
+`SpiInterface` read/write op, keeping the existing post-command wait
+in place — belt-and-suspenders bracketing that closes the
+BUSY-assertion latency window (T_SW ≤ 600 ns) a single level-poll can
+miss.
 
 ---
 
