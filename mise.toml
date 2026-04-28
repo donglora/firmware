@@ -4,7 +4,7 @@ just = "latest"
 # Cargo-installed tooling via mise's `cargo:` backend.
 "cargo:cargo-binutils" = "latest"   # rust-objcopy, rust-size
 "cargo:cargo-hex-to-uf2" = "latest" # ELF → UF2 for nRF52 / RP2040 DFU drives
-"cargo:espup" = "latest"            # bootstraps the ESP Xtensa toolchain
+"cargo:espup" = "0.17.1"            # ESP Xtensa toolchain installer (pinned: [env] paths below match this version's defaults)
 "cargo:espflash" = "3"              # flash + save-image for ESP targets (4.x requires esp_app_desc!() in app — revisit alongside esp-hal 1.1+ / drop-the-patches cleanup)
 "cargo:probe-rs-tools" = "latest"   # debug-probe flash/run for ARM targets
 
@@ -13,7 +13,7 @@ just = "latest"
 # extra `rustup target add` step at setup time.
 #
 # Xtensa ESP targets are NOT listed here — they use the self-contained `esp`
-# toolchain installed out-of-band by `espup` (see `just setup`). That
+# toolchain populated by `mise run esp-install` (see [tasks] below). That
 # toolchain ships its own rust-src for `-Zbuild-std`.
 #
 # profile = "minimal" (just rustc, rust-std, cargo), "default" (adds rust-docs, rustfmt, clippy)
@@ -22,3 +22,25 @@ just = "latest"
 version = "1.94"
 profile = "default"
 targets = "thumbv6m-none-eabi,thumbv7em-none-eabihf"
+
+# ESP Xtensa toolchain. `cargo:espup` above only installs the *installer*;
+# the actual rustc-esp + xtensa-esp-elf-gcc + esp-clang toolchains are
+# populated by `mise run esp-install` (or `just setup`).
+#
+# espup hardcodes its install root to ~/.rustup/toolchains/esp/ — there's
+# no --prefix or --install-dir flag — so the binaries necessarily live
+# there. The [env] block below pins the exact PATH and LIBCLANG_PATH so
+# every `mise exec` (which the justfile uses for `set shell`) resolves
+# the cross-toolchain without depending on espup's stray ~/export-esp.sh.
+#
+# Bumping versions: edit the version dirs in BOTH [tasks.esp-install] (so
+# espup installs the matching crosstool) AND [env] (so the path resolves).
+[env]
+_.path = [
+  "{{env.HOME}}/.rustup/toolchains/esp/xtensa-esp-elf/esp-15.2.0_20250920/xtensa-esp-elf/bin",
+]
+LIBCLANG_PATH = "{{env.HOME}}/.rustup/toolchains/esp/xtensa-esp32-elf-clang/esp-20.1.1_20250829/esp-clang/lib"
+
+[tasks.esp-install]
+description = "Install the ESP Xtensa toolchain (rustc-esp + GCC + clang) at versions matching [env]"
+run = "espup install --crosstool-toolchain-version esp-15.2.0_20250920"

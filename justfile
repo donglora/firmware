@@ -19,10 +19,11 @@ boards := "heltec_v3 heltec_v3_uart heltec_v4 elecrow_thinknode_m2 lilygo_tbeam 
 setup:
     mise trust --yes
     mise install
-    @# ESP Xtensa toolchain (not a rustup component — installed out-of-band by espup)
+    @# ESP Xtensa toolchain — installed via the `esp-install` mise task
+    @# (which pins versions to match mise.toml's [env] paths).
     @if ! rustup toolchain list | grep -q "^esp"; then \
-        echo "ESP toolchain not found, installing via espup (this may take a while)..."; \
-        espup install || { echo "error: espup install failed" >&2; exit 1; }; \
+        echo "ESP toolchain not found, installing via mise task (this may take a while)..."; \
+        mise run esp-install || { echo "error: esp-install task failed" >&2; exit 1; }; \
     fi
 
 # Build release firmware for all boards, installing toolchains as needed
@@ -154,7 +155,6 @@ _cargo board cmd extra_args="" extra_features="":
     extra=""; buildstd=""; \
     case "$target" in xtensa-*) \
         just _require_esp_toolchain; \
-        [ -f "$HOME/export-esp.sh" ] && . "$HOME/export-esp.sh"; \
         extra="+esp"; buildstd="-Zbuild-std=core,alloc";; \
     esac; \
     cargo $extra {{cmd}} --target "$target" --features "$feat" $buildstd {{extra_args}}
@@ -168,15 +168,17 @@ _can_build board:
         *) rustup target list --installed | grep -q "^$target$" || rustup target add "$target" ;; \
     esac
 
-# Ensure the ESP Xtensa toolchain is installed (espup installed via mise).
-# The esp toolchain ships with its own cargo, rustc, and rust-src — no extra
+# Ensure the ESP Xtensa toolchain is installed. The actual install is
+# delegated to the `esp-install` mise task so the version pin lives in
+# mise.toml alongside the matching [env] PATH/LIBCLANG_PATH entries.
+# The esp toolchain ships its own cargo, rustc, and rust-src — no extra
 # components are needed on top.
 [private]
 _require_esp_toolchain:
     @just _ensure_tools
     @if ! rustup toolchain list | grep -q "^esp"; then \
-        echo "ESP toolchain not found, installing via espup (this may take a while)..." >&2; \
-        espup install || { echo "error: espup install failed" >&2; exit 1; }; \
+        echo "ESP toolchain not found, installing via mise task (this may take a while)..." >&2; \
+        mise run esp-install || { echo "error: esp-install task failed" >&2; exit 1; }; \
     fi
 
 # Find a serial port matching any of the given VID:PID pairs (checked in order)
