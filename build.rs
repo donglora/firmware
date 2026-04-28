@@ -108,19 +108,31 @@ fn main() {
     println!("cargo:rerun-if-changed=src/board/mod.rs.j2");
     println!("cargo:rerun-if-changed={}", board_dir);
 
-    // cortex-m-rt's link.x does `INCLUDE memory.x`. Copy the correct layout
-    // into OUT_DIR based on the target MCU family.
+    // cortex-m-rt's link.x does `INCLUDE memory.x`. Resolve the layout
+    // in two steps:
+    //   1. Per-board override: `ld/{board}-memory.x` if it exists.
+    //   2. MCU-family default by target triple.
+    // The override path is for boards that deviate from the family
+    // default (e.g. WIO Tracker L1 currently has no SoftDevice in flash
+    // and needs ORIGIN=0x1000 instead of the SD-aware 0x26000). Drop
+    // the per-board file once the layout matches the family default.
     let target = std::env::var("TARGET").unwrap_or_default();
-    let memory_x = match target.as_str() {
-        "thumbv7em-none-eabihf" => Some("ld/nrf52840-memory.x"),
-        "thumbv6m-none-eabi" => Some("ld/rp2040-memory.x"),
-        _ => None,
+    let board_specific = format!("ld/{}-memory.x", enabled[0]);
+    let memory_x: Option<String> = if std::path::Path::new(&board_specific).exists() {
+        Some(board_specific.clone())
+    } else {
+        match target.as_str() {
+            "thumbv7em-none-eabihf" => Some("ld/nrf52840-memory.x".to_string()),
+            "thumbv6m-none-eabi" => Some("ld/rp2040-memory.x".to_string()),
+            _ => None,
+        }
     };
     if let Some(src) = memory_x {
         let out_dir = std::env::var("OUT_DIR").unwrap();
-        fs::copy(src, format!("{out_dir}/memory.x")).expect("failed to copy memory.x");
+        fs::copy(&src, format!("{out_dir}/memory.x")).expect("failed to copy memory.x");
         println!("cargo:rustc-link-search={out_dir}");
     }
     println!("cargo:rerun-if-changed=ld/nrf52840-memory.x");
     println!("cargo:rerun-if-changed=ld/rp2040-memory.x");
+    println!("cargo:rerun-if-changed={}", board_specific);
 }
