@@ -418,6 +418,19 @@ statechart! {
 
                 state Transmitting {
                     entry: announce_entered_tx;
+                    // Per hsmc README rule §6, exit actions fire on every
+                    // departure from Transmitting — including the
+                    // Operational-level `on(WedgeDetected) => Recovering`
+                    // transition that bypasses Transmitting's own
+                    // `on(TransmitFailed) => respond_tx_failed` handler.
+                    // Without this the host never gets a TX_DONE/TX_FAILED
+                    // reply on a wedge mid-TX and waits its 2 s firmware-
+                    // timeout. `respond_tx_failed` no-ops if `last_tx_tag`
+                    // is None (the normal-completion path consumed it via
+                    // `take()`), so it's a clean tag-correlated reply
+                    // GUARANTEE: every CmdTx gets a response no matter
+                    // how Transmitting is exited.
+                    exit: respond_tx_failed;
                     exit: announce_packet_tx;
                     default(TransmittingFromIdle);
 
