@@ -46,6 +46,22 @@ use render::{BoardInfo, RSSI_HISTORY_LEN};
 const BOARD_NAME: &str = Board::NAME;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+// Splash board-name font selection. Every OLED we drive is 128 px wide;
+// the primary font (FONT_6X10, 6 px advance) fits up to 21 ASCII chars
+// across the screen, the fallback (FONT_5X8, 5 px advance) fits up to
+// 25. If even the fallback can't fit, fail at compile time so the board
+// porter shortens NAME rather than silently overflowing the splash.
+const SPLASH_SCREEN_W_PX: u32 = 128;
+const SPLASH_FONT_PRIMARY_W_PX: u32 = 6;
+const SPLASH_FONT_FALLBACK_W_PX: u32 = 5;
+const BOARD_NAME_FITS_PRIMARY_FONT: bool =
+    (BOARD_NAME.len() as u32) * SPLASH_FONT_PRIMARY_W_PX <= SPLASH_SCREEN_W_PX;
+const _: () = assert!(
+    (BOARD_NAME.len() as u32) * SPLASH_FONT_FALLBACK_W_PX <= SPLASH_SCREEN_W_PX,
+    "Board::NAME is too long for the 128 px splash screen even with the FONT_5X8 fallback \
+     (max 25 ASCII chars). Shorten the NAME constant in src/board/<board>.rs.",
+);
+
 /// Sentinel: no packet received in this slot. Below SX1262 sensitivity
 /// floor (-120 dBm), so it cannot be confused with a real RSSI value.
 const NO_SIGNAL: i16 = -121;
@@ -491,7 +507,7 @@ pub async fn display_task(
 mod render {
     use core::fmt::Write;
 
-    use embedded_graphics::mono_font::ascii::{FONT_6X10, FONT_9X15_BOLD};
+    use embedded_graphics::mono_font::ascii::{FONT_5X8, FONT_6X10, FONT_9X15_BOLD};
     use embedded_graphics::mono_font::MonoTextStyle;
     use embedded_graphics::pixelcolor::BinaryColor;
     use embedded_graphics::prelude::*;
@@ -771,14 +787,31 @@ mod render {
             .draw(target)
             .ok();
 
-        Text::with_alignment(
-            board.name,
-            Point::new(center_x, 28),
-            style,
-            Alignment::Center,
-        )
-        .draw(target)
-        .ok();
+        // Board-name font picked at compile time by
+        // BOARD_NAME_FITS_PRIMARY_FONT (see top of display.rs). If the
+        // name fits FONT_6X10 we use it; otherwise we fall back to
+        // FONT_5X8. The const_assert at the BOARD_NAME definition
+        // rejects names that overflow even the fallback.
+        if super::BOARD_NAME_FITS_PRIMARY_FONT {
+            Text::with_alignment(
+                board.name,
+                Point::new(center_x, 28),
+                style,
+                Alignment::Center,
+            )
+            .draw(target)
+            .ok();
+        } else {
+            let small_style = MonoTextStyle::new(&FONT_5X8, BinaryColor::On);
+            Text::with_alignment(
+                board.name,
+                Point::new(center_x, 28),
+                small_style,
+                Alignment::Center,
+            )
+            .draw(target)
+            .ok();
+        }
 
         Text::with_alignment(
             board.mac,
@@ -804,7 +837,7 @@ mod render {
     /// the left inviting the user to visit the URL.
     pub fn learn_more(target: &mut impl DrawTarget<Color = BinaryColor>) {
         use embedded_graphics::image::{Image, ImageRaw};
-        use embedded_graphics::mono_font::ascii::{FONT_5X8, FONT_7X14_BOLD};
+        use embedded_graphics::mono_font::ascii::{FONT_4X6, FONT_7X14_BOLD};
 
         let bb = target.bounding_box();
         let w = bb.size.width as i32;
@@ -821,7 +854,11 @@ mod render {
         let col_center = col_w / 2;
 
         let title_style = MonoTextStyle::new(&FONT_7X14_BOLD, BinaryColor::On);
-        let text_style = MonoTextStyle::new(&FONT_5X8, BinaryColor::On);
+        // FONT_4X6 (4 px advance) on the URL line so "donglora.com"
+        // (12 chars × 4 = 48 px) fits the 64 px left column with ~8 px
+        // breathing room either side, instead of FONT_5X8's 60 px which
+        // visually touches both edges.
+        let text_style = MonoTextStyle::new(&FONT_4X6, BinaryColor::On);
 
         // Layout on a 64 px display:
         //   blank
