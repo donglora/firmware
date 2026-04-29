@@ -2,24 +2,24 @@
 //!
 //! ```text
 //! Host
-//! ├── Disconnected             (default)   no DTR
-//! └── Connected                            host attached
-//!     ├── WaitingForFirstFrame (default)   DTR up, no traffic yet
-//!     │                                    NO inactivity timer (boot quiet
-//!     │                                    is normal — chart structurally
-//!     │                                    blocks the spurious 1s fire).
-//!     └── Active                           ≥1 frame seen since connect
-//!                                          inactivity timer (1s) armed and
-//!                                          restarted by every frame via
-//!                                          self-transition.
+//! ├── Disconnected   (default)   no DTR
+//! └── Connected                  host attached, DTR up
+//!     │                          resting here means no traffic yet —
+//!     │                          NO inactivity timer (boot quiet is
+//!     │                          normal; chart structurally blocks the
+//!     │                          spurious 1s fire).
+//!     └── Active                 ≥1 frame seen since connect
+//!                                inactivity timer (1s) armed and
+//!                                restarted by every frame via
+//!                                self-transition.
 //! ```
 //!
 //! Two chart-level invariants made structurally impossible by the shape:
 //! 1. **No spurious inactivity at boot.** The 1-second timer only exists
 //!    in `Active`, which requires a `FrameReceived` event to enter.
 //!    A freshly-connected host that holds DTR high but sends nothing
-//!    sits in `WaitingForFirstFrame` indefinitely — no timer, no warn,
-//!    no Reset cascade.
+//!    rests at `Connected` indefinitely (hsmc 0.5 optional-default
+//!    "microwave Standby" pattern) — no timer, no warn, no Reset cascade.
 //! 2. **Chart-owned timer scope.** Per hsmc README rule §7 (timers
 //!    armed by state lifecycle), the inactivity timer is cancelled on
 //!    every exit of `Active`, restarted on every entry. No global
@@ -58,8 +58,8 @@ const POLL_INTERVAL_MS: u64 = 100;
 pub enum HostInput {
     DtrRaised,
     DtrDropped,
-    /// A USB read returned ≥1 byte. Drives `WaitingForFirstFrame →
-    /// Active` (first frame after connect) and the `Active → Active`
+    /// A USB read returned ≥1 byte. Drives `Connected → Active` on
+    /// the first frame after DTR up, and the `Active → Active`
     /// self-transition that restarts the inactivity timer per
     /// hsmc README rule §4 (self-transition exits + re-enters target,
     /// re-arming its timer).
@@ -122,24 +122,21 @@ statechart! {
             entry: wake_display;
             exit: reset_radio, reset_display;
             on(DtrDropped) => Disconnected;
-            default(WaitingForFirstFrame);
-
-            // Default child of Connected. No inactivity timer yet —
-            // a freshly-connected host that hasn't sent its first byte
-            // is normal (mux-rs holds DTR high before any client
-            // attaches). Stays here indefinitely until the first
-            // frame arrives.
-            state WaitingForFirstFrame {
-                on(FrameReceived) => Active;
-            }
+            // hsmc 0.5 microwave-Standby pattern: Connected itself is the
+            // resting "DTR up, no traffic yet" state. No inactivity timer
+            // here — boot quiet is normal (mux-rs holds DTR high before
+            // any client attaches), so the chart structurally cannot fire
+            // a 1 s warn before the first byte. The first FrameReceived
+            // descends into Active, which owns the inactivity timer.
+            on(FrameReceived) => Active;
 
             // Inactivity timer is chart-scoped: armed on every entry to
-            // Active (whether from WaitingForFirstFrame or self-loop
-            // after a frame), cancelled on every exit (per hsmc README
-            // rule §7). The self-transition `on(FrameReceived) =>
-            // Active` re-enters Active per rule §4, re-arming the
-            // timer — equivalent to the "reset last_frame_at on each
-            // byte" pattern but expressed in chart shape.
+            // Active (from Connected on the first frame, or from the
+            // self-transition below on each subsequent frame), cancelled
+            // on every exit (per hsmc README rule §7). The self-transition
+            // re-enters Active per rule §4, re-arming the timer —
+            // equivalent to the "reset last_frame_at on each byte" pattern
+            // but expressed in chart shape.
             //
             // hsmc's `after` triggers want `hsmc::Duration` (re-export
             // of `core::time::Duration`), not `embassy_time::Duration`.
@@ -275,9 +272,9 @@ async fn protocol_loop<'d, D: embassy_usb_driver::Driver<'d>>(
                     n,
                     receiver.dtr(),
                 );
-                // Drives WaitingForFirstFrame → Active on first byte
-                // and Active → Active (timer-restart) on every byte
-                // after. The chart owns inactivity from here.
+                // Drives Connected → Active on first byte and
+                // Active → Active (timer-restart) on every byte after.
+                // The chart owns inactivity from here.
                 let _ = machine.dispatch(HostInput::FrameReceived).await;
                 dispatch_bytes(&mut decoder, &read_buf[..n], commands, outbound).await;
             }
@@ -385,9 +382,9 @@ async fn protocol_loop<'d, D: embassy_usb_driver::Driver<'d>>(
 
         // DTR edge detection — drives Connected / Disconnected
         // transitions. The chart's `current_state()` may be
-        // Disconnected, Connected/WaitingForFirstFrame, or
-        // Connected/Active per the new hierarchy. We're connected if
-        // current state is anywhere inside Connected.
+        // Disconnected, Connected (resting), or Connected/Active.
+        // We're connected if current state is anywhere inside
+        // Connected.
         let dtr_high = receiver.dtr();
         let was_connected = !matches!(
             machine.current_state(),
