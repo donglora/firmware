@@ -70,8 +70,10 @@ impl LoRaBoard for Board {
 ### 5. Add display init
 
 ```rust
-pub async fn create_display(i2c: DisplayI2c) -> Option<DisplayDriver> {
-    // Construct and initialize your display driver (SSD1306, SH1106, etc.)
+pub async fn create_display(parts: DisplayParts) -> Option<DisplayDriver> {
+    // Construct and initialize your display driver (SSD1306, SH1106,
+    // ST7789, etc.) using whatever pins/buses you bundled into
+    // DisplayParts in `into_parts()`.
 }
 ```
 

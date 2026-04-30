@@ -40,6 +40,21 @@ static_cell = "2.1"
 display-interface = "0.5"
 embedded-graphics = "0.8"
 ssd1306 = { version = "0.10", features = ["async"] }
+# T114 ST7789 TFT (color, async SPI). Optional — only pulled in by the
+# heltec_mesh_node_t114 feature. Mono OLED boards keep their existing
+# display-interface + ssd1306/sh1106 stack and don't pay for these.
+#
+# `lcd-async` is an async fork of mipidsi: same model/builder shape but
+# `init()` and pixel writes are `async fn`s. Combined with embassy-nrf's
+# DMA-backed async Spim, the dashboard repaint yields the executor for
+# the duration of the SPI transfer instead of busy-looping for ~65 ms,
+# so the radio task isn't starved.
+#
+# embedded-hal-bus needs the `async` feature for `ExclusiveDevice` to
+# implement `embedded_hal_async::spi::SpiDevice` (in addition to the
+# blocking impl).
+lcd-async = { version = "0.1", optional = true }
+embedded-hal-bus = { version = "0.3", optional = true, features = ["async"] }
 
 # Async IO traits and combinators
 embedded-io-async = "0.7"
@@ -249,6 +264,20 @@ wio_tracker_l1 = [
   "dep:defmt-rtt",
   "dep:embassy-nrf",
   "dep:panic-probe",
+  "embassy-executor/platform-cortex-m",
+  "embassy-executor/executor-thread",
+]
+heltec_mesh_node_t114 = [
+  "embassy",
+  "trace-defmt",
+  "dep:cortex-m",
+  "dep:cortex-m-rt",
+  "cortex-m-rt/set-vtor",
+  "dep:defmt-rtt",
+  "dep:embassy-nrf",
+  "dep:panic-probe",
+  "dep:lcd-async",
+  "dep:embedded-hal-bus",
   "embassy-executor/platform-cortex-m",
   "embassy-executor/executor-thread",
 ]

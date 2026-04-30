@@ -46,7 +46,7 @@ use crate::protocol::{cap, Info, MAX_MCU_UID_LEN, MAX_RADIO_UID_LEN};
 
 #[cfg(not(test))]
 cfg_if::cfg_if! {
-    if #[cfg(any(feature = "rak_wisblock_4631", feature = "wio_tracker_l1", feature = "waveshare_rp2040_lora"))] {
+    if #[cfg(any(feature = "heltec_mesh_node_t114", feature = "rak_wisblock_4631", feature = "wio_tracker_l1", feature = "waveshare_rp2040_lora"))] {
         use defmt_rtt as _;
         use panic_probe as _;
     } else if #[cfg(any(feature = "heltec_v3", feature = "heltec_v3_uart", feature = "heltec_v4", feature = "elecrow_thinknode_m2", feature = "lilygo_tbeam_supreme", feature = "lilygo_tbeam"))] {
@@ -71,7 +71,7 @@ static mut INFO: Option<Info> = None;
 
 #[cfg(not(test))]
 cfg_if::cfg_if! {
-    if #[cfg(any(feature = "rak_wisblock_4631", feature = "wio_tracker_l1", feature = "waveshare_rp2040_lora"))] {
+    if #[cfg(any(feature = "heltec_mesh_node_t114", feature = "rak_wisblock_4631", feature = "wio_tracker_l1", feature = "waveshare_rp2040_lora"))] {
         #[embassy_executor::main]
         async fn main(spawner: Spawner) {
             run(spawner).await;
@@ -93,7 +93,7 @@ async fn run(spawner: Spawner) {
     // of the RTT log. Critical for soak-debugging silent crash-reboots:
     // a self-rebooting firmware otherwise looks like the log just
     // restarted with no explanation. nRF52840-only.
-    #[cfg(any(feature = "rak_wisblock_4631", feature = "wio_tracker_l1"))]
+    #[cfg(any(feature = "heltec_mesh_node_t114", feature = "rak_wisblock_4631", feature = "wio_tracker_l1"))]
     crate::hal::nrf52840::dump_reset_reason();
 
     let parts = board.into_parts();

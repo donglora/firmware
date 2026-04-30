@@ -42,8 +42,8 @@ pub struct DisplayParts {
 
 // ── Display init ────────────────────────────────────────────────────
 
-pub async fn create_display(i2c: DisplayI2c) -> Option<DisplayDriver> {
-    let mut display = crate::driver::sh1106::Sh1106::new(i2c, 0x3D);
+pub async fn create_display(parts: DisplayParts) -> Option<DisplayDriver> {
+    let mut display = crate::driver::sh1106::Sh1106::new(parts.i2c, 0x3D);
 
     embassy_time::Timer::after_millis(100).await;
     if display.init().await.is_err() {

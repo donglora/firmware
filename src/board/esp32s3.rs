@@ -63,13 +63,13 @@ pub type DisplayDriver = ssd1306::Ssd1306Async<
     feature = "heltec_v3_uart",
     feature = "heltec_v4"
 ))]
-pub async fn create_display(i2c: DisplayI2c) -> Option<DisplayDriver> {
+pub async fn create_display(parts: DisplayParts) -> Option<DisplayDriver> {
     use ssd1306::mode::DisplayConfigAsync;
     use ssd1306::prelude::{Brightness, DisplayRotation};
     use ssd1306::size::DisplaySize128x64;
     use ssd1306::{I2CDisplayInterface, Ssd1306Async};
 
-    let interface = I2CDisplayInterface::new(i2c);
+    let interface = I2CDisplayInterface::new(parts.i2c);
     let mut display = Ssd1306Async::new(interface, DisplaySize128x64, DisplayRotation::Rotate0)
         .into_buffered_graphics_mode();
 

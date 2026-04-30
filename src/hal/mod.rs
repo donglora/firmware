@@ -15,7 +15,11 @@ pub mod esp32s3;
 #[cfg(feature = "lilygo_tbeam")]
 pub mod esp32;
 
-#[cfg(any(feature = "rak_wisblock_4631", feature = "wio_tracker_l1"))]
+#[cfg(any(
+    feature = "heltec_mesh_node_t114",
+    feature = "rak_wisblock_4631",
+    feature = "wio_tracker_l1"
+))]
 pub mod nrf52840;
 
 #[cfg(feature = "waveshare_rp2040_lora")]

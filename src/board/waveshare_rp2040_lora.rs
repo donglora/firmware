@@ -41,12 +41,16 @@ pub struct UsbParts {
 }
 
 pub struct DisplayParts {
+    // No display on this board, but the trait still wants concrete
+    // peripheral types. The i2c bus type is reserved for the future
+    // possibility of an external OLED add-on.
+    #[allow(dead_code)]
     pub i2c: DisplayI2c,
 }
 
 // ── Display init ───────────────────────────────────────────────────
 
-pub async fn create_display(_i2c: DisplayI2c) -> Option<DisplayDriver> {
+pub async fn create_display(_parts: DisplayParts) -> Option<DisplayDriver> {
     None
 }
 

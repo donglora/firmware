@@ -20,6 +20,7 @@ All commands are run from the `firmware/` directory.
 
 | Board | Feature | MCU | Radio | USB | Target |
 |-------|---------|-----|-------|-----|--------|
+| Heltec Mesh Node T114 | `heltec_mesh_node_t114` | nRF52840 | SX1262 | Native CDC-ACM | thumbv7em-none-eabihf |
 | Heltec V3 | `heltec_v3` | ESP32-S3 | SX1262 | Native CDC-ACM | xtensa-esp32s3-none-elf |
 | Heltec V3 (UART) | `heltec_v3_uart` | ESP32-S3 | SX1262 | CP2102 bridge | xtensa-esp32s3-none-elf |
 | Heltec V4 | `heltec_v4` | ESP32-S3 | SX1262 | Native CDC-ACM | xtensa-esp32s3-none-elf |

@@ -6,10 +6,7 @@
 //!
 //! See `src/board/PORTING.md` for a step-by-step guide to adding a new board.
 
-use embedded_graphics::draw_target::DrawTarget;
-use embedded_graphics::pixelcolor::BinaryColor;
-
-use crate::driver::DisplayBrightness;
+use crate::display::BoardDisplay;
 
 /// Async RGB LED control. Boards without an LED use `()` which is a no-op.
 pub trait RgbLed {
@@ -37,9 +34,10 @@ pub trait LoRaBoard: Sized {
     /// Display peripheral bundle (I2C bus for display init).
     type DisplayParts;
 
-    /// Concrete display driver type (must implement DrawTarget for rendering
-    /// and DisplayBrightness for the two-level dim control).
-    type DisplayDriver: DrawTarget<Color = BinaryColor> + DisplayBrightness;
+    /// Concrete display driver type. Each board's driver implements
+    /// [`BoardDisplay`] to render the splash + dashboard content into its
+    /// native pixel format and resolution and to flush / dim the panel.
+    type DisplayDriver: BoardDisplay;
 
     /// RGB LED driver. Boards without an LED use `()`.
     type LedDriver: RgbLed;

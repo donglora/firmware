@@ -13,11 +13,23 @@ bind_interrupts!(pub struct Irqs {
     USBD => embassy_nrf::usb::InterruptHandler<embassy_nrf::peripherals::USBD>;
     SPIM3 => embassy_nrf::spim::InterruptHandler<embassy_nrf::peripherals::SPI3>;
     TWISPI0 => embassy_nrf::twim::InterruptHandler<embassy_nrf::peripherals::TWISPI0>;
+    // SPIM2 is the second free SPI peripheral on nRF52840. Only used
+    // today by the Heltec T114 (ST7789 TFT panel on a write-only bus
+    // that can't share with the SX1262 on SPIM3 because the pins
+    // differ). Boards that don't use SPI2 don't construct anything
+    // against it and this binding is a no-op for them.
+    SPI2 => embassy_nrf::spim::InterruptHandler<embassy_nrf::peripherals::SPI2>;
 });
 
 // ── MCU-level types ─────────────────────────────────────────────────
 
 pub type SpiBus = embassy_nrf::spim::Spim<'static>;
+// I2C is used by some nRF boards (RAK4631 / Wio Tracker L1 OLED) but not
+// others (T114 uses SPI for the TFT). The `#[allow(dead_code)]` keeps
+// the type available for any board that wants it without per-feature
+// gating; rustc otherwise fires a dead-code lint when the active board
+// doesn't construct one.
+#[allow(dead_code)]
 pub type I2cBus = embassy_nrf::twim::Twim<'static>;
 pub type UsbNrfDriver =
     embassy_nrf::usb::Driver<'static, &'static embassy_nrf::usb::vbus_detect::SoftwareVbusDetect>;
@@ -37,6 +49,8 @@ pub fn share_spi_bus(spi: SpiBus) -> &'static embassy_sync::mutex::Mutex<NoopRaw
 ///
 /// Every nRF52840 Twim user needs a `&'static mut [u8]` buffer.
 /// This provides one via StaticCell so board files don't repeat the pattern.
+/// Unused on nRF boards that don't expose I2C (e.g. T114 uses SPI for the TFT).
+#[allow(dead_code)]
 pub fn alloc_i2c_buffer() -> &'static mut [u8; 256] {
     static TWIM_BUF: StaticCell<[u8; 256]> = StaticCell::new();
     TWIM_BUF.init([0u8; 256])

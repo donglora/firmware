@@ -13,7 +13,7 @@ version := `sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml`
 # Xtensa targets are built with `+esp` + `-Zbuild-std=core,alloc` (the
 # self-contained esp toolchain ships its own rust-src; the public
 # nightly drifts ahead and breaks core-stdlib compilation).
-boards := "heltec_v3 heltec_v3_uart heltec_v4 elecrow_thinknode_m2 lilygo_tbeam lilygo_tbeam_supreme rak_wisblock_4631 waveshare_rp2040_lora wio_tracker_l1"
+boards := "heltec_mesh_node_t114 heltec_v3 heltec_v3_uart heltec_v4 elecrow_thinknode_m2 lilygo_tbeam lilygo_tbeam_supreme rak_wisblock_4631 waveshare_rp2040_lora wio_tracker_l1"
 
 # Install all required tools and toolchains
 setup:
@@ -246,6 +246,7 @@ _flash_uf2 board:
 [private]
 _info name:
     @case "{{name}}" in \
+        heltec_mesh_node_t114) echo "heltec_mesh_node_t114 thumbv7em-none-eabihf nRF52840_xxAA" ;; \
         heltec_v3)             echo "heltec_v3 xtensa-esp32s3-none-elf esp32s3" ;; \
         heltec_v3_uart)        echo "heltec_v3_uart xtensa-esp32s3-none-elf esp32s3" ;; \
         heltec_v4)             echo "heltec_v4 xtensa-esp32s3-none-elf esp32s3" ;; \

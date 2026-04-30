@@ -52,8 +52,8 @@ pub struct DisplayParts {
 
 // ── Display init ────────────────────────────────────────────────────
 
-pub async fn create_display(i2c: DisplayI2c) -> Option<DisplayDriver> {
-    let mut display = crate::driver::sh1106::Sh1106::new(i2c, 0x3C);
+pub async fn create_display(parts: DisplayParts) -> Option<DisplayDriver> {
+    let mut display = crate::driver::sh1106::Sh1106::new(parts.i2c, 0x3C);
 
     // Retry 3× with 100ms backoff. The SH1106's first transaction
     // after power-on can return Err if the chip's internal voltage

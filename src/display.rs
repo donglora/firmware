@@ -38,27 +38,29 @@ use hsmc::statechart;
 
 use crate::board::{self, Board, DisplayDriver, DisplayParts, LedDriver, LoRaBoard, RgbLed};
 use crate::channel::{DisplayCommand, DisplayCommandChannel, RadioEvent, RadioEventChannel};
-use crate::driver::DisplayBrightness;
 use crate::protocol::LoRaConfig;
-
-use render::{BoardInfo, RSSI_HISTORY_LEN};
 
 const BOARD_NAME: &str = Board::NAME;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-// Splash board-name font selection. Every OLED we drive is 128 px wide;
-// the primary font (FONT_6X10, 6 px advance) fits up to 21 ASCII chars
-// across the screen, the fallback (FONT_5X8, 5 px advance) fits up to
-// 25. If even the fallback can't fit, fail at compile time so the board
-// porter shortens NAME rather than silently overflowing the splash.
+/// Number of slots in the dashboard's RSSI/TX sparkline ring buffer.
+pub const RSSI_HISTORY_LEN: usize = 128;
+
+// Mono splash board-name font selection. The mono OLEDs we drive are
+// 128 px wide; the primary font (FONT_6X10, 6 px advance) fits up to 21
+// ASCII chars across, the fallback (FONT_5X8, 5 px advance) fits up to
+// 25. If even the fallback can't fit on a mono OLED, fail at compile
+// time so the board porter shortens NAME rather than silently
+// overflowing the splash. Color renderers have their own size budget
+// and simply use the same NAME with their own font choice.
 const SPLASH_SCREEN_W_PX: u32 = 128;
 const SPLASH_FONT_PRIMARY_W_PX: u32 = 6;
 const SPLASH_FONT_FALLBACK_W_PX: u32 = 5;
-const BOARD_NAME_FITS_PRIMARY_FONT: bool =
+pub(crate) const BOARD_NAME_FITS_PRIMARY_FONT: bool =
     (BOARD_NAME.len() as u32) * SPLASH_FONT_PRIMARY_W_PX <= SPLASH_SCREEN_W_PX;
 const _: () = assert!(
     (BOARD_NAME.len() as u32) * SPLASH_FONT_FALLBACK_W_PX <= SPLASH_SCREEN_W_PX,
-    "Board::NAME is too long for the 128 px splash screen even with the FONT_5X8 fallback \
+    "Board::NAME is too long for the 128 px mono splash screen even with the FONT_5X8 fallback \
      (max 25 ASCII chars). Shorten the NAME constant in src/board/<board>.rs.",
 );
 
@@ -66,11 +68,184 @@ const _: () = assert!(
 /// floor (-120 dBm), so it cannot be confused with a real RSSI value.
 const NO_SIGNAL: i16 = -121;
 
+/// Hand-authored 64 × 64 pixel-perfect QR bitmap for the splash
+/// "learn more" screen. 1 bit/pixel, MSB-first, row-major. Bit `1` is
+/// "light" (OLED pixel on), bit `0` is "dark" (OLED pixel off), so when
+/// drawn with `BinaryColor::On` = lit, the QR appears with the
+/// traditional dark-on-light look including a proper quiet zone. The
+/// color renderer remaps bit 1 → white, bit 0 → black for the same
+/// visual contrast on a black-background TFT.
+pub(crate) const QR_WIDTH_PX: u32 = 64;
+pub(crate) const QR_BITMAP: [u8; 512] = [
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE, 0x00, 0x07, 0x9F, 0xFE, 0x60, 0x00, 0x7F, 0xFE,
+    0x00, 0x07, 0x9F, 0xFE, 0x60, 0x00, 0x7F, 0xFE, 0x7F, 0xE6, 0x18, 0x19, 0xE7, 0xFE, 0x7F, 0xFE,
+    0x7F, 0xE6, 0x18, 0x19, 0xE7, 0xFE, 0x7F, 0xFE, 0x60, 0x67, 0x81, 0xE6, 0x66, 0x06, 0x7F, 0xFE,
+    0x60, 0x67, 0x81, 0xE6, 0x66, 0x06, 0x7F, 0xFE, 0x60, 0x66, 0x19, 0x87, 0xE6, 0x06, 0x7F, 0xFE,
+    0x60, 0x66, 0x19, 0x87, 0xE6, 0x06, 0x7F, 0xFE, 0x60, 0x67, 0xE6, 0x1F, 0xE6, 0x06, 0x7F, 0xFE,
+    0x60, 0x67, 0xE6, 0x1F, 0xE6, 0x06, 0x7F, 0xFE, 0x7F, 0xE6, 0x67, 0x80, 0x67, 0xFE, 0x7F, 0xFE,
+    0x7F, 0xE6, 0x67, 0x80, 0x67, 0xFE, 0x7F, 0xFE, 0x00, 0x06, 0x66, 0x66, 0x60, 0x00, 0x7F, 0xFE,
+    0x00, 0x06, 0x66, 0x66, 0x60, 0x00, 0x7F, 0xFF, 0xFF, 0xFF, 0xFE, 0x61, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFE, 0x61, 0xFF, 0xFF, 0xFF, 0xFE, 0x00, 0x60, 0x06, 0x01, 0x99, 0x99, 0xFF, 0xFE,
+    0x00, 0x60, 0x06, 0x01, 0x99, 0x99, 0xFF, 0xFE, 0x01, 0x98, 0x1F, 0x9E, 0x79, 0xF9, 0xFF, 0xFE,
+    0x01, 0x98, 0x1F, 0x9E, 0x79, 0xF9, 0xFF, 0xFF, 0xE0, 0x66, 0x18, 0x61, 0x9F, 0x98, 0x7F, 0xFF,
+    0xE0, 0x66, 0x18, 0x61, 0x9F, 0x98, 0x7F, 0xFF, 0x98, 0x1E, 0x01, 0xE7, 0x99, 0xFE, 0x7F, 0xFF,
+    0x98, 0x1E, 0x01, 0xE7, 0x99, 0xFE, 0x7F, 0xFF, 0xE1, 0xE6, 0x19, 0xF8, 0x06, 0x60, 0x7F, 0xFF,
+    0xE1, 0xE6, 0x19, 0xF8, 0x06, 0x60, 0x7F, 0xFE, 0x19, 0xF8, 0x06, 0x1E, 0x79, 0x99, 0xFF, 0xFE,
+    0x19, 0xF8, 0x06, 0x1E, 0x79, 0x99, 0xFF, 0xFE, 0x7E, 0x01, 0xFF, 0x80, 0x18, 0x18, 0x7F, 0xFE,
+    0x7E, 0x01, 0xFF, 0x80, 0x18, 0x18, 0x7F, 0xFE, 0x7E, 0x19, 0x9E, 0x1E, 0x78, 0x7E, 0x7F, 0xFE,
+    0x7E, 0x19, 0x9E, 0x1E, 0x78, 0x7E, 0x7F, 0xFE, 0x60, 0x06, 0x66, 0x66, 0x00, 0x67, 0xFF, 0xFE,
+    0x60, 0x06, 0x66, 0x66, 0x00, 0x67, 0xFF, 0xFF, 0xFF, 0xFE, 0x67, 0xF8, 0x7E, 0x1F, 0xFF, 0xFF,
+    0xFF, 0xFE, 0x67, 0xF8, 0x7E, 0x1F, 0xFF, 0xFE, 0x00, 0x06, 0x00, 0x7E, 0x66, 0x60, 0x7F, 0xFE,
+    0x00, 0x06, 0x00, 0x7E, 0x66, 0x60, 0x7F, 0xFE, 0x7F, 0xE7, 0x99, 0xE6, 0x7E, 0x1E, 0x7F, 0xFE,
+    0x7F, 0xE7, 0x99, 0xE6, 0x7E, 0x1E, 0x7F, 0xFE, 0x60, 0x66, 0x61, 0xF8, 0x00, 0x60, 0x7F, 0xFE,
+    0x60, 0x66, 0x61, 0xF8, 0x00, 0x60, 0x7F, 0xFE, 0x60, 0x66, 0x06, 0x01, 0x86, 0x00, 0x7F, 0xFE,
+    0x60, 0x66, 0x06, 0x01, 0x86, 0x00, 0x7F, 0xFE, 0x60, 0x66, 0x67, 0x86, 0x7F, 0x86, 0x7F, 0xFE,
+    0x60, 0x66, 0x67, 0x86, 0x7F, 0x86, 0x7F, 0xFE, 0x7F, 0xE6, 0x66, 0x18, 0x00, 0x1E, 0x7F, 0xFE,
+    0x7F, 0xE6, 0x66, 0x18, 0x00, 0x1E, 0x7F, 0xFE, 0x00, 0x06, 0x66, 0x67, 0x98, 0x00, 0x7F, 0xFE,
+    0x00, 0x06, 0x66, 0x67, 0x98, 0x00, 0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+];
+
 /// Which dashboard badge is in view (drives the RX/TX indicator only).
 #[derive(Debug, Clone, Copy)]
 pub enum Badge {
     Rx,
     Tx,
+}
+
+// ── Display content types (shared across all renderers) ───────────────
+//
+// `BoardInfo` and `DashboardCtx` describe *what* to draw on the splash
+// and dashboard screens. Each board's `BoardDisplay` impl decides *how*
+// to render that content for its native pixel format and resolution.
+
+/// Static-ish board identity rendered on the splash + dashboard.
+pub struct BoardInfo<'a> {
+    pub name: &'a str,
+    pub version: &'a str,
+    pub mac: &'a str,
+}
+
+/// Live dashboard data at the moment of a render call.
+pub struct DashboardCtx<'a> {
+    pub badge: Badge,
+    pub config: Option<LoRaConfig>,
+    pub rx_count: u32,
+    pub tx_count: u32,
+    pub last_rssi: Option<i16>,
+    pub last_snr: Option<i16>,
+    pub rssi_history: &'a [i16; RSSI_HISTORY_LEN],
+    pub tx_history: &'a [bool; RSSI_HISTORY_LEN],
+    pub rssi_count: usize,
+    pub current_slot_rssi: i16,
+    pub current_slot_tx: bool,
+    pub board: &'a BoardInfo<'a>,
+}
+
+// ── BoardDisplay trait ────────────────────────────────────────────────
+//
+// One logical display surface, four content states (splash×2, dashboard,
+// blank), plus brightness control and a flush hook. Each board's display
+// driver implements this directly — color depth, resolution, dimming
+// strategy, and any framebuffer flushing live behind the trait.
+
+/// Single trait every board's display driver implements. The display
+/// task talks to the trait; the per-driver impl handles native format.
+///
+/// `present()` is named distinctly from any inherent `flush()` method on
+/// concrete display types so method resolution doesn't get ambiguous.
+pub trait BoardDisplay {
+    fn present(&mut self) -> impl core::future::Future<Output = ()>;
+    fn set_bright(&mut self) -> impl core::future::Future<Output = ()>;
+    fn set_dim(&mut self) -> impl core::future::Future<Output = ()>;
+
+    fn render_splash_learn_more(&mut self);
+    fn render_splash_info(&mut self, info: &BoardInfo<'_>);
+    fn render_dashboard(&mut self, ctx: &DashboardCtx<'_>);
+    fn render_blank(&mut self);
+}
+
+// Color renderer module — used by `crate::driver::st7789::St7789Color` on
+// the Heltec T114 to draw native 240×135 Rgb565 dashboards/splash screens.
+// Gated to the T114 feature so other boards don't pay for the imports.
+#[cfg(feature = "heltec_mesh_node_t114")]
+pub mod render_color;
+
+// Shared QR-code blit, generic over color. Used by both the mono and
+// color splash screens to render the bitmap with proper quiet zones.
+mod qr;
+
+// ── Mono-OLED adapters ────────────────────────────────────────────────
+//
+// SH1106 + SSD1306Async both render `BinaryColor` content into a 128×64
+// framebuffer flushed via I2C. Their `BoardDisplay` impls all delegate
+// to `mod render` — the existing pixel-perfect mono renderer.
+
+#[cfg(any(
+    feature = "wio_tracker_l1",
+    feature = "elecrow_thinknode_m2",
+    feature = "lilygo_tbeam_supreme",
+    feature = "rak_wisblock_4631"
+))]
+impl<I> BoardDisplay for crate::driver::sh1106::Sh1106<I>
+where
+    I: embedded_hal_async::i2c::I2c,
+{
+    async fn present(&mut self) {
+        let _ = crate::driver::sh1106::Sh1106::flush(self).await;
+    }
+    async fn set_bright(&mut self) {
+        crate::driver::DisplayBrightness::set_bright(self).await;
+    }
+    async fn set_dim(&mut self) {
+        crate::driver::DisplayBrightness::set_dim(self).await;
+    }
+    fn render_splash_learn_more(&mut self) {
+        render::learn_more(self);
+    }
+    fn render_splash_info(&mut self, info: &BoardInfo<'_>) {
+        render::info(self, info);
+    }
+    fn render_dashboard(&mut self, ctx: &DashboardCtx<'_>) {
+        render::dashboard(self, ctx);
+    }
+    fn render_blank(&mut self) {
+        render::blank(self);
+    }
+}
+
+impl<DI, SIZE> BoardDisplay
+    for ssd1306::Ssd1306Async<DI, SIZE, ssd1306::mode::BufferedGraphicsModeAsync<SIZE>>
+where
+    DI: display_interface::AsyncWriteOnlyDataCommand,
+    SIZE: ssd1306::size::DisplaySizeAsync,
+{
+    async fn present(&mut self) {
+        let _ = ssd1306::Ssd1306Async::flush(self).await;
+    }
+    async fn set_bright(&mut self) {
+        crate::driver::DisplayBrightness::set_bright(self).await;
+    }
+    async fn set_dim(&mut self) {
+        crate::driver::DisplayBrightness::set_dim(self).await;
+    }
+    fn render_splash_learn_more(&mut self) {
+        render::learn_more(self);
+    }
+    fn render_splash_info(&mut self, info: &BoardInfo<'_>) {
+        render::info(self, info);
+    }
+    fn render_dashboard(&mut self, ctx: &DashboardCtx<'_>) {
+        render::dashboard(self, ctx);
+    }
+    fn render_blank(&mut self) {
+        render::blank(self);
+    }
 }
 
 /// Fine-grained events driving the `Display` statechart.
@@ -180,14 +355,14 @@ impl DisplayContext {
             version: VERSION,
             mac: mac_str,
         };
-        render::info(display, &info);
-        let _ = display.flush().await;
+        display.render_splash_info(&info);
+        display.present().await;
     }
 
     async fn flush_learn_more(&mut self) {
         let display = &mut self.peripherals.display;
-        render::learn_more(display);
-        let _ = display.flush().await;
+        display.render_splash_learn_more();
+        display.present().await;
     }
 
     async fn flush_dashboard(&mut self, badge: Badge) {
@@ -199,27 +374,28 @@ impl DisplayContext {
             version: VERSION,
             mac: mac_str,
         };
-        render::dashboard(
-            display,
+        let ctx = DashboardCtx {
             badge,
-            self.run.config,
-            self.run.rx_count,
-            self.run.tx_count,
-            self.run.last_rssi,
-            self.run.last_snr,
-            &self.run.rssi_history,
-            &self.run.tx_history,
-            self.run.rssi_count,
-            self.run.current_slot_rssi,
-            self.run.current_slot_tx,
-            &info,
-        );
-        let _ = display.flush().await;
+            config: self.run.config,
+            rx_count: self.run.rx_count,
+            tx_count: self.run.tx_count,
+            last_rssi: self.run.last_rssi,
+            last_snr: self.run.last_snr,
+            rssi_history: &self.run.rssi_history,
+            tx_history: &self.run.tx_history,
+            rssi_count: self.run.rssi_count,
+            current_slot_rssi: self.run.current_slot_rssi,
+            current_slot_tx: self.run.current_slot_tx,
+            board: &info,
+        };
+        display.render_dashboard(&ctx);
+        display.present().await;
     }
 
     async fn flush_blank(&mut self) {
-        render::blank(&mut self.peripherals.display);
-        let _ = self.peripherals.display.flush().await;
+        let display = &mut self.peripherals.display;
+        display.render_blank();
+        display.present().await;
     }
 
     // Boards without an LED use `LedDriver = ()`; the `RgbLed for ()` impl
@@ -453,7 +629,7 @@ pub async fn display_task(
         ),
     );
 
-    let Some(display) = board::create_display(parts.i2c).await else {
+    let Some(display) = board::create_display(parts).await else {
         defmt::error!("display init failed, running LED-only loop");
         loop {
             match display_commands.receive().await {
@@ -516,10 +692,8 @@ mod render {
     use embedded_graphics::text::{Alignment, Text};
     use heapless::String;
 
-    use super::Badge;
-    use crate::protocol::{LoRaBandwidth, LoRaConfig};
-
-    pub const RSSI_HISTORY_LEN: usize = 128;
+    use super::{Badge, BoardInfo, DashboardCtx, QR_WIDTH_PX, RSSI_HISTORY_LEN};
+    use crate::protocol::LoRaBandwidth;
 
     const CHAR_W: i32 = 6;
     const FONT_H: i32 = 10;
@@ -528,72 +702,20 @@ mod render {
     const RSSI_MIN: i16 = -120;
     const RSSI_MAX: i16 = 0;
 
-    /// Hand-authored 64 × 64 pixel-perfect QR bitmap for the splash
-    /// "learn more" screen. 1 bit/pixel, MSB-first, row-major. Bit `1` is
-    /// "light" (OLED pixel on), bit `0` is "dark" (OLED pixel off), so
-    /// when drawn with `BinaryColor::On` = lit, the QR appears with the
-    /// traditional dark-on-light look including a proper quiet zone.
-    const QR_WIDTH_PX: u32 = 64;
-    const QR_BITMAP: [u8; 512] = [
-        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE, 0x00, 0x07, 0x9F,
-        0xFE, 0x60, 0x00, 0x7F, 0xFE, 0x00, 0x07, 0x9F, 0xFE, 0x60, 0x00, 0x7F, 0xFE, 0x7F, 0xE6,
-        0x18, 0x19, 0xE7, 0xFE, 0x7F, 0xFE, 0x7F, 0xE6, 0x18, 0x19, 0xE7, 0xFE, 0x7F, 0xFE, 0x60,
-        0x67, 0x81, 0xE6, 0x66, 0x06, 0x7F, 0xFE, 0x60, 0x67, 0x81, 0xE6, 0x66, 0x06, 0x7F, 0xFE,
-        0x60, 0x66, 0x19, 0x87, 0xE6, 0x06, 0x7F, 0xFE, 0x60, 0x66, 0x19, 0x87, 0xE6, 0x06, 0x7F,
-        0xFE, 0x60, 0x67, 0xE6, 0x1F, 0xE6, 0x06, 0x7F, 0xFE, 0x60, 0x67, 0xE6, 0x1F, 0xE6, 0x06,
-        0x7F, 0xFE, 0x7F, 0xE6, 0x67, 0x80, 0x67, 0xFE, 0x7F, 0xFE, 0x7F, 0xE6, 0x67, 0x80, 0x67,
-        0xFE, 0x7F, 0xFE, 0x00, 0x06, 0x66, 0x66, 0x60, 0x00, 0x7F, 0xFE, 0x00, 0x06, 0x66, 0x66,
-        0x60, 0x00, 0x7F, 0xFF, 0xFF, 0xFF, 0xFE, 0x61, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE,
-        0x61, 0xFF, 0xFF, 0xFF, 0xFE, 0x00, 0x60, 0x06, 0x01, 0x99, 0x99, 0xFF, 0xFE, 0x00, 0x60,
-        0x06, 0x01, 0x99, 0x99, 0xFF, 0xFE, 0x01, 0x98, 0x1F, 0x9E, 0x79, 0xF9, 0xFF, 0xFE, 0x01,
-        0x98, 0x1F, 0x9E, 0x79, 0xF9, 0xFF, 0xFF, 0xE0, 0x66, 0x18, 0x61, 0x9F, 0x98, 0x7F, 0xFF,
-        0xE0, 0x66, 0x18, 0x61, 0x9F, 0x98, 0x7F, 0xFF, 0x98, 0x1E, 0x01, 0xE7, 0x99, 0xFE, 0x7F,
-        0xFF, 0x98, 0x1E, 0x01, 0xE7, 0x99, 0xFE, 0x7F, 0xFF, 0xE1, 0xE6, 0x19, 0xF8, 0x06, 0x60,
-        0x7F, 0xFF, 0xE1, 0xE6, 0x19, 0xF8, 0x06, 0x60, 0x7F, 0xFE, 0x19, 0xF8, 0x06, 0x1E, 0x79,
-        0x99, 0xFF, 0xFE, 0x19, 0xF8, 0x06, 0x1E, 0x79, 0x99, 0xFF, 0xFE, 0x7E, 0x01, 0xFF, 0x80,
-        0x18, 0x18, 0x7F, 0xFE, 0x7E, 0x01, 0xFF, 0x80, 0x18, 0x18, 0x7F, 0xFE, 0x7E, 0x19, 0x9E,
-        0x1E, 0x78, 0x7E, 0x7F, 0xFE, 0x7E, 0x19, 0x9E, 0x1E, 0x78, 0x7E, 0x7F, 0xFE, 0x60, 0x06,
-        0x66, 0x66, 0x00, 0x67, 0xFF, 0xFE, 0x60, 0x06, 0x66, 0x66, 0x00, 0x67, 0xFF, 0xFF, 0xFF,
-        0xFE, 0x67, 0xF8, 0x7E, 0x1F, 0xFF, 0xFF, 0xFF, 0xFE, 0x67, 0xF8, 0x7E, 0x1F, 0xFF, 0xFE,
-        0x00, 0x06, 0x00, 0x7E, 0x66, 0x60, 0x7F, 0xFE, 0x00, 0x06, 0x00, 0x7E, 0x66, 0x60, 0x7F,
-        0xFE, 0x7F, 0xE7, 0x99, 0xE6, 0x7E, 0x1E, 0x7F, 0xFE, 0x7F, 0xE7, 0x99, 0xE6, 0x7E, 0x1E,
-        0x7F, 0xFE, 0x60, 0x66, 0x61, 0xF8, 0x00, 0x60, 0x7F, 0xFE, 0x60, 0x66, 0x61, 0xF8, 0x00,
-        0x60, 0x7F, 0xFE, 0x60, 0x66, 0x06, 0x01, 0x86, 0x00, 0x7F, 0xFE, 0x60, 0x66, 0x06, 0x01,
-        0x86, 0x00, 0x7F, 0xFE, 0x60, 0x66, 0x67, 0x86, 0x7F, 0x86, 0x7F, 0xFE, 0x60, 0x66, 0x67,
-        0x86, 0x7F, 0x86, 0x7F, 0xFE, 0x7F, 0xE6, 0x66, 0x18, 0x00, 0x1E, 0x7F, 0xFE, 0x7F, 0xE6,
-        0x66, 0x18, 0x00, 0x1E, 0x7F, 0xFE, 0x00, 0x06, 0x66, 0x67, 0x98, 0x00, 0x7F, 0xFE, 0x00,
-        0x06, 0x66, 0x67, 0x98, 0x00, 0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-        0xFF, 0xFF,
-    ];
 
-    pub struct BoardInfo<'a> {
-        pub name: &'a str,
-        pub version: &'a str,
-        pub mac: &'a str,
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn dashboard(
-        target: &mut impl DrawTarget<Color = BinaryColor>,
-        badge: Badge,
-        config: Option<LoRaConfig>,
-        rx_count: u32,
-        tx_count: u32,
-        last_rssi: Option<i16>,
-        last_snr: Option<i16>,
-        rssi_history: &[i16; RSSI_HISTORY_LEN],
-        tx_history: &[bool; RSSI_HISTORY_LEN],
-        rssi_count: usize,
-        current_slot_rssi: i16,
-        current_slot_tx: bool,
-        board: &BoardInfo,
-    ) {
+    pub fn dashboard(target: &mut impl DrawTarget<Color = BinaryColor>, ctx: &DashboardCtx<'_>) {
+        let badge = ctx.badge;
+        let config = ctx.config;
+        let rx_count = ctx.rx_count;
+        let tx_count = ctx.tx_count;
+        let last_rssi = ctx.last_rssi;
+        let last_snr = ctx.last_snr;
+        let rssi_history = ctx.rssi_history;
+        let tx_history = ctx.tx_history;
+        let rssi_count = ctx.rssi_count;
+        let current_slot_rssi = ctx.current_slot_rssi;
+        let current_slot_tx = ctx.current_slot_tx;
+        let board = ctx.board;
         let bb = target.bounding_box();
         let w = bb.size.width as i32;
         let h = bb.size.height as i32;
@@ -833,10 +955,9 @@ mod render {
     }
 
     /// Alternate splash screen: 64 × 64 pixel-perfect QR bitmap on the
-    /// right (with its own quiet zone baked in), centered text column on
-    /// the left inviting the user to visit the URL.
+    /// right (centered within its quiet zone via `super::qr::draw`),
+    /// centered text column on the left inviting the user to visit the URL.
     pub fn learn_more(target: &mut impl DrawTarget<Color = BinaryColor>) {
-        use embedded_graphics::image::{Image, ImageRaw};
         use embedded_graphics::mono_font::ascii::{FONT_4X6, FONT_7X14_BOLD};
 
         let bb = target.bounding_box();
@@ -844,10 +965,14 @@ mod render {
 
         let _ = target.clear(BinaryColor::Off);
 
-        // ── QR code: flush to the right edge, 1:1 pixel rendering ───
+        // ── QR code: rightmost 64 × 64 region, centered cells ───────
         let qr_x = w - QR_WIDTH_PX as i32;
-        let qr_raw: ImageRaw<BinaryColor> = ImageRaw::new(&QR_BITMAP, QR_WIDTH_PX);
-        Image::new(&qr_raw, Point::new(qr_x, 0)).draw(target).ok();
+        super::qr::draw(
+            target,
+            Point::new(qr_x, 0),
+            BinaryColor::On,
+            BinaryColor::Off,
+        );
 
         // ── Text column (everything left of the QR) ─────────────────
         let col_w = qr_x;

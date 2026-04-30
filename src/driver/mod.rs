@@ -9,10 +9,14 @@ pub mod sh1106;
 #[cfg(any(feature = "lilygo_tbeam_supreme", feature = "lilygo_tbeam"))]
 pub mod axp;
 
-#[cfg(feature = "lilygo_tbeam")]
+#[cfg(any(feature = "lilygo_tbeam", feature = "heltec_mesh_node_t114"))]
 pub mod inverted_pin;
 
+#[cfg(feature = "heltec_mesh_node_t114")]
+pub mod st7789;
+
 #[cfg(any(
+    feature = "heltec_mesh_node_t114",
     feature = "heltec_v3",
     feature = "heltec_v3_uart",
     feature = "heltec_v4",
