@@ -52,6 +52,9 @@ cfg_if::cfg_if! {
     } else if #[cfg(any(feature = "heltec_v3", feature = "heltec_v3_uart", feature = "heltec_v4", feature = "elecrow_thinknode_m2", feature = "lilygo_tbeam_supreme", feature = "lilygo_tbeam"))] {
         use esp_backtrace as _;
         use esp_println as _;
+        // Emits the IDF app descriptor into `.flash.appdesc`. espflash v4
+        // refuses any ESP image that lacks it.
+        esp_bootloader_esp_idf::esp_app_desc!();
     }
 }
 

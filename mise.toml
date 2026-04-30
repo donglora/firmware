@@ -5,7 +5,7 @@ just = "latest"
 "cargo:cargo-binutils" = "latest"   # rust-objcopy, rust-size
 "cargo:cargo-hex-to-uf2" = "latest" # ELF → UF2 for nRF52 / RP2040 DFU drives
 "cargo:espup" = "0.17.1"            # ESP Xtensa toolchain installer (pinned: [env] paths below match this version's defaults)
-"cargo:espflash" = "3"              # flash + save-image for ESP targets (4.x requires esp_app_desc!() in app — revisit alongside esp-hal 1.1+ / drop-the-patches cleanup)
+"cargo:espflash" = "4"              # flash + save-image for ESP targets
 "cargo:probe-rs-tools" = "latest"   # debug-probe flash/run for ARM targets
 
 # Stable Rust + cross-compile targets. Targets land under $RUSTUP_HOME for

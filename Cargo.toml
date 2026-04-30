@@ -14,10 +14,6 @@ homepage = "https://github.com/donglora/firmware"
 keywords = ["lora", "radio", "embedded", "usb", "firmware"]
 categories = ["embedded", "hardware-support", "no-std"]
 
-# NOTE: esp-{hal,rtos,backtrace,println} patched from GitHub main (see
-# [patch.crates-io] below). The patch versions must stay semver-compatible
-# with the version requirements above, or Cargo silently drops the patch
-# and falls back to the (older) crates.io release.
 [dependencies]
 cfg-if = "1.0"
 critical-section = "1.2"
@@ -64,6 +60,12 @@ esp-println = { version = "0.17", optional = true, features = [
 ] }
 esp-rtos = { version = "0.3", optional = true, features = [
   "embassy",
+] }
+# Emits the IDF app descriptor (`.flash.appdesc`) that espflash v4
+# requires in every ESP binary. The chip subfeature is selected per
+# board below alongside the other esp-* chip features.
+esp-bootloader-esp-idf = { version = "0.5", optional = true, features = [
+  "defmt",
 ] }
 
 # nRF52840 (RAK 4631)
@@ -146,10 +148,12 @@ heltec_v3 = [
   "embassy",
   "trace-defmt",
   "dep:esp-backtrace",
+  "dep:esp-bootloader-esp-idf",
   "dep:esp-hal",
   "dep:esp-println",
   "dep:esp-rtos",
   "esp-backtrace/esp32s3",
+  "esp-bootloader-esp-idf/esp32s3",
   "esp-hal/esp32s3",
   "esp-println/esp32s3",
   "esp-rtos/esp32s3",
@@ -158,10 +162,12 @@ heltec_v3_uart = [
   "embassy",
   "trace-defmt",
   "dep:esp-backtrace",
+  "dep:esp-bootloader-esp-idf",
   "dep:esp-hal",
   "dep:esp-println",
   "dep:esp-rtos",
   "esp-backtrace/esp32s3",
+  "esp-bootloader-esp-idf/esp32s3",
   "esp-hal/esp32s3",
   "esp-println/esp32s3",
   "esp-rtos/esp32s3",
@@ -170,10 +176,12 @@ heltec_v4 = [
   "embassy",
   "trace-defmt",
   "dep:esp-backtrace",
+  "dep:esp-bootloader-esp-idf",
   "dep:esp-hal",
   "dep:esp-println",
   "dep:esp-rtos",
   "esp-backtrace/esp32s3",
+  "esp-bootloader-esp-idf/esp32s3",
   "esp-hal/esp32s3",
   "esp-println/esp32s3",
   "esp-rtos/esp32s3",
@@ -182,10 +190,12 @@ elecrow_thinknode_m2 = [
   "embassy",
   "trace-defmt",
   "dep:esp-backtrace",
+  "dep:esp-bootloader-esp-idf",
   "dep:esp-hal",
   "dep:esp-println",
   "dep:esp-rtos",
   "esp-backtrace/esp32s3",
+  "esp-bootloader-esp-idf/esp32s3",
   "esp-hal/esp32s3",
   "esp-println/esp32s3",
   "esp-rtos/esp32s3",
@@ -194,10 +204,12 @@ lilygo_tbeam_supreme = [
   "embassy",
   "trace-defmt",
   "dep:esp-backtrace",
+  "dep:esp-bootloader-esp-idf",
   "dep:esp-hal",
   "dep:esp-println",
   "dep:esp-rtos",
   "esp-backtrace/esp32s3",
+  "esp-bootloader-esp-idf/esp32s3",
   "esp-hal/esp32s3",
   "esp-println/esp32s3",
   "esp-rtos/esp32s3",
@@ -206,10 +218,12 @@ lilygo_tbeam = [
   "embassy",
   "trace-defmt",
   "dep:esp-backtrace",
+  "dep:esp-bootloader-esp-idf",
   "dep:esp-hal",
   "dep:esp-println",
   "dep:esp-rtos",
   "esp-backtrace/esp32",
+  "esp-bootloader-esp-idf/esp32",
   "esp-hal/esp32",
   "esp-println/esp32",
   "esp-rtos/esp32",
@@ -249,17 +263,6 @@ waveshare_rp2040_lora = [
   "embassy-executor/platform-cortex-m",
   "embassy-executor/executor-thread",
 ]
-
-# REVISIT: pulling esp-{hal,rtos,backtrace,println} from esp-rs/esp-hal main
-# to ride ahead of crates.io releases (notably for embassy-executor 0.10
-# support in esp-rtos). When bumping the upstream rev, also bump the version
-# requirements above to stay semver-compatible — Cargo silently ignores a
-# patch whose version falls outside the requested range.
-[patch.crates-io]
-esp-hal       = { git = "https://github.com/esp-rs/esp-hal.git", branch = "main" }
-esp-rtos      = { git = "https://github.com/esp-rs/esp-hal.git", branch = "main" }
-esp-backtrace = { git = "https://github.com/esp-rs/esp-hal.git", branch = "main" }
-esp-println   = { git = "https://github.com/esp-rs/esp-hal.git", branch = "main" }
 
 [lints.rust]
 # hsmc 0.3's `statechart!` macro emits `#[cfg(feature = "journal")]`
