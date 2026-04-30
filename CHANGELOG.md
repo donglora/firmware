@@ -7,6 +7,86 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-04-29
+
+### Fixed
+
+- **Major LoRa reliability boost across every radio family.** Switched
+  `lora-phy` from crates.io to the
+  [`swaits/lora-rs#fixed`](https://github.com/swaits/lora-rs/tree/fixed)
+  fork branch — a merge of three fixes awaiting upstream PR acceptance,
+  pinned at `e8a52ebd` via `Cargo.lock`:
+  - [#428](https://github.com/lora-rs/lora-rs/pull/428) — sx126x:
+    pre-command BUSY check + standby/IRQ-clear hygiene around CAD.
+  - [#431](https://github.com/lora-rs/lora-rs/pull/431) — sx127x:
+    clear stale IRQ flags in `do_rx` before mode change.
+  - [#432](https://github.com/lora-rs/lora-rs/pull/432) — sx127x:
+    clear stale IRQ flags before reconfiguring DIO mapping in
+    `set_irq_params`.
+
+  Stability gain across the fleet: the sx126x BUSY-race fix lands on
+  every nRF / RP2040 board, and the sx127x IRQ-clear fixes unblock the
+  LilyGo T-Beam (classic) in particular.
+- **UART host RX delivery on UART-only boards.** `RADIO_THROTTLED` was
+  never cleared on UART (`heltec_v3_uart`, `elecrow_thinknode_m2`,
+  `lilygo_tbeam`) — the throttle gate added in v1.3.0's chart-first
+  restructure silently dropped every async RX from boot. Mirrored the
+  USB pattern: clear the throttle on successful `tx.write_all`, re-arm
+  on failure.
+- **UART host watchdog spurious-trip under saturated bidirectional
+  load.** The `select3`-based loop serialised read and write;
+  `tx.write_all` (~25 ms per max frame at 115200 baud) blocked the read
+  poll long enough for `last_frame_at` to age past 1000 ms, cascading a
+  Reset to radio (`Unconfigured`) and display (splash) and leaving
+  subsequent host TX commands timing out. Restructured `host_task` into
+  two sub-loops joined in the same task: `read_loop` owns rx +
+  watchdog, `write_loop` owns tx + throttle. Same executor, disjoint
+  borrows on the split rx/tx halves, no Mutex needed. Also reset the
+  `FrameDecoder` on watchdog fire so a host that resumes mid-frame
+  resyncs cleanly on the next `0x00` sentinel (USB gets this for free
+  via DTR-drop reset; UART has no DTR).
+- **Splash board-name overflow on long names.** Names that don't fit
+  `FONT_6X10` (21 ASCII chars on a 128 px-wide OLED) now fall back to
+  `FONT_5X8` (25 chars). A `const_assert` at the `BOARD_NAME`
+  definition rejects names that overflow even the fallback, so the
+  board porter shortens `NAME` at compile time rather than getting
+  silent overflow at runtime. Also dropped the URL-line font on the
+  "learn more" screen from `FONT_5X8` to `FONT_4X6` so `donglora.com`
+  sits inside the 64 px column with breathing room instead of touching
+  both edges.
+
+### Changed
+
+- **`hsmc` 0.4 → 0.5.** `default(...)` is optional on every state in
+  0.5; collapsed the `WaitingForFirstFrame` substate that existed only
+  because 0.4 required `Connected` to declare a default child.
+  `Connected` itself is now the resting "DTR up, no traffic yet" state,
+  with `on(FrameReceived) => Active` descending into the
+  inactivity-timer state on the first byte. Behavior is identical
+  (entry/exit chain math unchanged); the host/usb chart has one fewer
+  state and one fewer `default()`. Display and Radio charts left as-is
+  — their defaults serve real grouping/lifecycle purposes, not 0.4
+  artifacts.
+- **ESP cross-toolchain pinned in `mise.toml`.** `[env]` now owns the
+  PATH (`xtensa-esp-elf-gcc` bin) and `LIBCLANG_PATH`, so any `mise
+  exec` resolves the linker without sourcing espup's stray
+  `~/export-esp.sh`. New `[tasks.esp-install]` invokes espup with the
+  matching crosstool version pin. `cargo:espup` pinned to `0.17.1` to
+  match the `[env]` paths. Triggered by a real failure where
+  `~/export-esp.sh` was moved to Trash and the ESP build broke with
+  `linker xtensa-esp32s3-elf-gcc not found`. Bumping ESP versions
+  remains a two-touch change: edit version dirs in BOTH
+  `[tasks.esp-install]` and `[env]`.
+- **ESP dependency requirements bumped** to track the upstream
+  `esp-rs/esp-hal` main branch: `esp-hal 1.0 → 1.1`, `esp-rtos 0.2 →
+  0.3`, `esp-backtrace 0.18 → 0.19`, `esp-println 0.16 → 0.17`. `cargo
+  update` had silently invalidated the `[patch.crates-io]` entries (the
+  patched versions were no longer semver-compatible with the old
+  top-level requirements), dropping the patches and falling back to
+  crates.io releases that pin `embassy-executor 0.9` — mismatched with
+  our `0.10`. Catching this keeps the patch suite consistent until the
+  planned `[patch.crates-io]`-removal pass.
+
 ## [1.4.0] - 2026-04-25
 
 ### Added
