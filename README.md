@@ -62,4 +62,8 @@ See [src/board/PORTING.md](src/board/PORTING.md).
 
 ## Protocol
 
-See [PROTOCOL.md](PROTOCOL.md) for the complete wire format specification.
+See [PROTOCOL.md](https://github.com/donglora/protocol-rs/blob/main/PROTOCOL.md)
+in the [donglora-protocol](https://github.com/donglora/protocol-rs) repo
+(crates.io: [`donglora-protocol`](https://crates.io/crates/donglora-protocol))
+for the complete wire format specification — that is the canonical home;
+this firmware just consumes it.
