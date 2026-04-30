@@ -7,6 +7,82 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-04-30
+
+### Added
+
+- **Heltec Mesh Node T114 board support** (nRF52840 + SX1262 + 1.14"
+  240×135 ST7789 color TFT). The first color display board in the
+  project, and the third nRF52840 + SX1262 board alongside the
+  RAK4631 and Wio Tracker L1.
+  - `VEXT_ENABLE` (P0.21) driven HIGH at boot to power the SX1262 +
+    TFT rail. Without this, lora-phy init succeeds at the SPI level
+    but TX_DONE never fires.
+  - `VTFT_CTRL` on P0.03 (active-LOW); PWM backlight on P0.15
+    (active-LOW, inverted) for smooth dim/bright transitions.
+  - TFT SPI2 (SCK P1.08 / MOSI P1.09) at 8 MHz over EasyDMA, async
+    `ExclusiveDevice` from `embedded-hal-bus`.
+  - Linker uses the shared `ld/nrf52840-memory.x` so the S140
+    SoftDevice region (0x01000–0x26000) is preserved per project
+    policy.
+
+- **`BoardDisplay` trait** (`src/display.rs`) bundles `render_*`,
+  `present()`, `set_bright()`, and `set_dim()`. Replaces the previous
+  `DrawTarget<Color = BinaryColor>` + `DisplayBrightness` combo as
+  the `LoRaBoard::DisplayDriver` bound, so each board renders in its
+  native pixel format and resolution without aliasing or
+  color-quantization round-trips. Existing mono OLED drivers
+  (`Sh1106`, `Ssd1306Async`) get adapter impls that delegate to the
+  existing `display::render` module — no behavior change for any
+  previously supported board.
+
+- **Async ST7789 driver** (`src/driver/st7789.rs`) wrapping
+  `lcd-async` (async fork of `mipidsi`) with a 64,800-byte raw-byte
+  framebuffer in `.bss`. Renders via
+  `lcd_async::raw_framebuf::RawFrameBuf<Rgb565, _>` and presents via
+  a single async DMA blit (`panel.show_raw_data(...).await`); the
+  await yields the executor for the ~65 ms SPI transfer so the radio
+  task isn't starved during repaints.
+
+- **Native 240×135 RGB565 renderer** (`src/display/render_color.rs`)
+  with splash, dashboard, and sparkline parity with the mono path,
+  plus a shared QR-code blit (`src/display/qr.rs`) generic over
+  `PixelColor`. The blit re-centers the 64×64 bitmap (cells in cols
+  0..50 with ~14 px right-side padding), so both mono and color
+  splash now show the QR with 7 px quiet zones on all four sides
+  (was visibly left-shifted on mono).
+
+- **Shared content types** (`BoardInfo`, `DashboardCtx`) decouple
+  *what* to draw from *how* each board renders it. `create_display()`
+  now takes the board's full `DisplayParts` bundle (was just the I2C
+  bus), so non-I2C displays can carry SPI + control pins through.
+
+- **IDF app descriptor on every ESP image.** New
+  `esp-bootloader-esp-idf` 0.5 dependency (chip-feature-gated like
+  the rest of the `esp-*` stack) plus `esp_app_desc!()` in
+  `src/main.rs`, which emits the `.flash.appdesc` section that
+  `espflash` v4 requires in every ESP binary.
+
+### Changed
+
+- **ESP build modernized to upstream crates.io.** Removed the
+  `[patch.crates-io]` block that pinned `esp-hal`, `esp-rtos`,
+  `esp-backtrace`, and `esp-println` to `esp-rs/esp-hal#main`. The
+  versions tracked there (`esp-hal 1.1`, `esp-rtos 0.3`,
+  `esp-backtrace 0.19`, `esp-println 0.17`) have all reached
+  crates.io with the `embassy-executor` 0.10 compatibility we needed,
+  so the local fork pins are no longer required. `cargo:espflash`
+  bumped to v4 in `mise.toml` to match.
+
+- **`hsmc` 0.5.0 → 0.5.1.** Patch bump pulled in transparently with
+  the lockfile refresh; no behavior change.
+
+- **Documentation consolidated.** `PROTOCOL.md` removed from the
+  firmware repo (it now lives canonically in the spec repo, linked
+  from `README.md`). `BLE_MUX_DESIGN_DOC.md` moved to
+  `docs/ble_mux_design.md` so all firmware design docs sit under
+  `docs/`.
+
 ## [1.4.1] - 2026-04-29
 
 ### Fixed
