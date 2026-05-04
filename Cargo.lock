@@ -1592,9 +1592,9 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "hsmc"
-version = "0.5.1"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "497ed9593e4baf6ef120b24aff80cb898f6832d32cdf01be9d90be0c06624e77"
+checksum = "18bb06fda289e60e17bc7483a222fc6d9d6865b92648f836242b7a79115cc91d"
 dependencies = [
  "defmt 0.3.100",
  "embassy-futures",
@@ -1606,9 +1606,9 @@ dependencies = [
 
 [[package]]
 name = "hsmc-macros"
-version = "0.5.1"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "49d0b1413ed69ba168f9d0edbf4a8ea21569eaf352edf4e11335ae3d765ba004"
+checksum = "289a7c9f1b677168229c8ad4e992380c3951d0908b52b1d2bfae8ff3c980c35d"
 dependencies = [
  "proc-macro2",
  "quote",

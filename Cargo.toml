@@ -29,7 +29,7 @@ embassy-usb-driver = "0.2"
 ucobs = { version = "0.3", features = ["legacy-msrv"] }
 heapless = "0.9"
 donglora-protocol = "1"
-hsmc = { version = "0.5", default-features = false, features = ["embassy", "trace-defmt"] }
+hsmc = { version = "0.6", default-features = false, features = ["embassy", "trace-defmt"] }
 # Fork branch carrying CAD IRQ-clear / standby-after-CAD fixes awaiting upstream PRs.
 # Switch back to crates.io once changes are upstreamed.
 lora-phy = { git = "https://github.com/swaits/lora-rs.git", branch = "fixed", features = ["defmt-03"] }
