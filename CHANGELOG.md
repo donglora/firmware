@@ -7,6 +7,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-05-11
+
+### Fixed
+
+- **`LoRaConfig.sync_word` is now actually applied to the SX126x.**
+  `reconfigure_radio` accepted the host's `sync_word` field in name
+  only — the value was stored in `self.config` but never written to
+  the chip's `LoRaSyncwordMSB`/`LoRaSyncwordLSB` register pair
+  (0x0740/0x0741, SX1261/2 datasheet Rev 2.2 §13.4.4). The chip sat
+  on whatever `LoRa::new(_, false, _)` set at cold init —
+  `LORAWAN_PRIVATE_SYNCWORD` (byte `0x12`, register pair `0x1424`).
+  Everyone got byte `0x12` regardless of the requested value. Worked
+  by accident for MeshCore (which uses byte `0x12`); silently broke
+  any host trying to talk to a non-MeshCore network. Fix wires
+  `cfg.sync_word` through to `lora.set_lora_sync_word(byte)` after
+  `enter_standby`, using the new lora-phy API from
+  [lora-rs/lora-rs#433](https://github.com/lora-rs/lora-rs/pull/433).
+  The `u16` protocol field is decoded back to its underlying byte
+  (`byte = (hi & 0xF0) | (lo >> 4)` after `to_be_bytes()`), the
+  inverse of lora-phy's `convert_sync_word` nibble-expansion. Honors
+  SX1261/2 §8.3.1 (BUSY-low precondition) via the existing
+  `ensure_ready + conditional set_standby` preamble in
+  `LoRa::set_lora_sync_word`.
+- **First TX after `SET_CONFIG` no longer fails with `ERR(ERadio)` on
+  a freshly-booted chip.** The chart's `prep_for_cad_act`
+  (`TxCadPrep` entry) and `prep_for_tx_act` (`TxPrep` entry) both
+  read `ctx.mdltn` and emit `TransmitFailed` → `ERR(ERadio)` if it's
+  `None`. But `ctx.mdltn` was only ever assigned on the RX path —
+  `try_start_rx_hw` (`RxArming` entry) and `cache_rx_pkt`
+  (`RxSession` entry). `reconfigure_radio` already called
+  `to_lora_mod_params(lora, cfg)` during `SET_CONFIG` but discarded
+  the result via `let _ = …?;` (the dropped comment claimed image
+  calibration; the function is pure compute on SX126x). Hidden in
+  practice by any prior `RX_START` (ai-bot, `ping_pong --role rx`,
+  etc.) leaving `ctx.mdltn` populated until the next reflash. Fix
+  threads the `ModulationParams` out of `reconfigure_radio` as its
+  return value, and `apply_set_config` caches it in `self.mdltn`
+  alongside `self.config`. First TX on a fresh boot now works
+  without a preceding `RX_START`.
+
+### Changed
+
+- **`lora-phy` `swaits/lora-rs#fixed` bumped from `e8a52ebd` →
+  `043d7659`.** The fork's `fixed` merge now includes a new
+  `feat/set-sync-word` branch alongside the three pre-existing
+  `fix/*` branches.
+  [lora-rs/lora-rs#433](https://github.com/lora-rs/lora-rs/pull/433)
+  adds the runtime `LoRa::set_lora_sync_word(u8)` API the radio fix
+  above depends on (was unavailable in stock lora-phy; the only
+  public sync-word entry points were `with_syncword` /
+  `new(_, public_network: bool, _)` at construction time). Strictly
+  additive in lora-phy: pure addition, no behavioral change to
+  `init_lora` / `with_syncword` / any existing path.
+- **`hsmc` 0.5 → 0.6.** Patch bump tracked via `cargo update -p
+  hsmc`; no behavior change in this crate's usage. Pulled in
+  separately from the radio fixes so the dep churn doesn't blur the
+  fix commits.
+
 ## [1.5.0] - 2026-04-30
 
 ### Added
