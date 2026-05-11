@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.5.2] - 2026-05-11
+
+### Changed
+
+- Refreshed `Cargo.lock` to pull in the latest compatible patch/minor
+  releases of dependencies. Notable bumps:
+  - `donglora-protocol` 1.1.0 → 1.2.0
+  - `esp-hal` 1.1.0 → 1.1.1
+  - `heapless` 0.9.2 → 0.9.3 (propagates through embassy + esp crates)
+  - `embassy-usb-driver` 0.2.0 → 0.2.1
+  - `embassy-usb-synopsys-otg` 0.3.2 → 0.3.3
+  - `enumset` 1.1.10 → 1.1.12
+  - `digest` 0.11.2 → 0.11.3, `hashbrown` 0.17.0 → 0.17.1,
+    `hybrid-array` 0.4.11 → 0.4.12, `cc` 1.2.61 → 1.2.62
+  No source changes; all 10 board targets compile clean and host-side
+  protocol tests pass.
+
 ## [1.5.1] - 2026-05-11
 
 ### Fixed
