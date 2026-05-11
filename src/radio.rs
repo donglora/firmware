@@ -1252,29 +1252,33 @@ impl RadioActions for RadioActionContext<'_> {
                     Some(lora) => reconfigure_radio(lora, &cfg).await,
                     None => Err(RadioError::Busy),
                 };
-                if recfg_result.is_err() {
-                    // Hardware failure: drop to Unconfigured (spec §6.3).
-                    // Clear all per-session state — including any in-flight
-                    // RxStart tag — so the next CmdRxStart in Unconfigured
-                    // is rejected cleanly (rather than racing a stale tag
-                    // through respond_err_start_rx on an unrelated path).
-                    self.config = None;
-                    self.cad_retry_delay_us = 0;
-                    self.pending_rx_start_tag = None;
-                    info!("config cleared (apply_set_config failure tag={=u16})", tag);
-                    self.send(tag, DeviceMessage::Err(ErrorCode::ERadio)).await;
-                    // Wedge takes precedence over ConfigFailedRadio so the
-                    // chart enters Recovering (NRESET + lora.init()) instead
-                    // of bouncing back to Unconfigured with a still-wedged
-                    // chip that the next SET_CONFIG would also fail on.
-                    if take_wedge_flag() {
-                        let _ = self.emit(RadioInput::WedgeDetected);
-                    } else {
-                        let _ = self.emit(RadioInput::ConfigFailedRadio);
+                let mdltn = match recfg_result {
+                    Ok(m) => m,
+                    Err(_) => {
+                        // Hardware failure: drop to Unconfigured (spec §6.3).
+                        // Clear all per-session state — including any in-flight
+                        // RxStart tag — so the next CmdRxStart in Unconfigured
+                        // is rejected cleanly (rather than racing a stale tag
+                        // through respond_err_start_rx on an unrelated path).
+                        self.config = None;
+                        self.cad_retry_delay_us = 0;
+                        self.pending_rx_start_tag = None;
+                        info!("config cleared (apply_set_config failure tag={=u16})", tag);
+                        self.send(tag, DeviceMessage::Err(ErrorCode::ERadio)).await;
+                        // Wedge takes precedence over ConfigFailedRadio so the
+                        // chart enters Recovering (NRESET + lora.init()) instead
+                        // of bouncing back to Unconfigured with a still-wedged
+                        // chip that the next SET_CONFIG would also fail on.
+                        if take_wedge_flag() {
+                            let _ = self.emit(RadioInput::WedgeDetected);
+                        } else {
+                            let _ = self.emit(RadioInput::ConfigFailedRadio);
+                        }
+                        return;
                     }
-                    return;
-                }
+                };
                 self.config = Some(cfg);
+                self.mdltn = Some(mdltn);
                 info!("config set (apply_set_config success tag={=u16})", tag);
                 self.cad_retry_delay_us = toa_us(&cfg, CAD_ASSUMED_PEER_PAYLOAD_B);
                 if self.cad_retry_delay_us > CAD_BUDGET_US {
@@ -2094,7 +2098,10 @@ fn to_lora_mod_params(
     lora.create_modulation_params(sf, bw, cr, cfg.freq_hz)
 }
 
-async fn reconfigure_radio(lora: &mut LoRaDriver, cfg: &LoRaConfig) -> Result<(), RadioError> {
+async fn reconfigure_radio(
+    lora: &mut LoRaDriver,
+    cfg: &LoRaConfig,
+) -> Result<lora_phy::mod_params::ModulationParams, RadioError> {
     lora_setup("reconfigure_radio.enter_standby", lora.enter_standby()).await?;
     // Apply the host-supplied LoRa sync word. The protocol field is a
     // u16 holding the SX126x register pair in big-endian order
@@ -2112,10 +2119,7 @@ async fn reconfigure_radio(lora: &mut LoRaDriver, cfg: &LoRaConfig) -> Result<()
         lora.set_lora_sync_word(sync_byte),
     )
     .await?;
-    // Calibrate image etc. via a throwaway create_modulation_params call
-    // — inside the SET_CONFIG OK window so first TX/RX is fast.
-    let _ = to_lora_mod_params(lora, cfg)?;
-    Ok(())
+    to_lora_mod_params(lora, cfg)
 }
 
 fn validate_lora(cfg: &LoRaConfig, info: &Info) -> Result<(), ErrorCode> {
