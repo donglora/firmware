@@ -2096,6 +2096,22 @@ fn to_lora_mod_params(
 
 async fn reconfigure_radio(lora: &mut LoRaDriver, cfg: &LoRaConfig) -> Result<(), RadioError> {
     lora_setup("reconfigure_radio.enter_standby", lora.enter_standby()).await?;
+    // Apply the host-supplied LoRa sync word. The protocol field is a
+    // u16 holding the SX126x register pair in big-endian order
+    // (RadioLib convention: 0x1424 == byte 0x12 == LoRa "private" /
+    // MeshCore; 0x3444 == byte 0x34 == LoRaWAN "public"). lora-phy's
+    // set_lora_sync_word takes the underlying single-byte form, so
+    // undo the nibble encoding: convert_sync_word(byte) puts the
+    // chip's mandatory 0x4 in the low nibble of each register byte,
+    // and the high nibble of each register byte holds the original
+    // byte's high/low nibble respectively.
+    let [hi, lo] = cfg.sync_word.to_be_bytes();
+    let sync_byte = (hi & 0xF0) | (lo >> 4);
+    lora_setup(
+        "reconfigure_radio.set_lora_sync_word",
+        lora.set_lora_sync_word(sync_byte),
+    )
+    .await?;
     // Calibrate image etc. via a throwaway create_modulation_params call
     // — inside the SET_CONFIG OK window so first TX/RX is fast.
     let _ = to_lora_mod_params(lora, cfg)?;
