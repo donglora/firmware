@@ -70,7 +70,16 @@ esp-backtrace = { version = "0.19", optional = true, features = [
 esp-hal = { version = "1.1", optional = true, features = [
   "unstable",
 ] }
-esp-println = { version = "0.17", optional = true, features = [
+# `default-features = false` strips `auto` + `colors`. The output target
+# (jtag-serial / uart / no-op / auto) is selected explicitly per board
+# feature below. UART-host boards (heltec_v3_uart, elecrow_thinknode_m2,
+# lilygo_tbeam) MUST use `no-op` — esp-println's `auto` falls back to
+# UART0 on every ESP target here (no USB-Serial-JTAG host is ever
+# attached to those boards), and UART0 IS the host protocol wire, so
+# any defmt::error!() or panic backtrace would corrupt frames mid-flight.
+# Native-USB boards keep `auto` so espflash-monitor still works in dev.
+esp-println = { version = "0.17", optional = true, default-features = false, features = [
+  "critical-section",
   "defmt-espflash",
 ] }
 esp-rtos = { version = "0.3", optional = true, features = [
@@ -171,6 +180,11 @@ heltec_v3 = [
   "esp-bootloader-esp-idf/esp32s3",
   "esp-hal/esp32s3",
   "esp-println/esp32s3",
+  # Native USB CDC-ACM via OTG_FS — UART0 (GPIO43/44) is dangling, so
+  # `auto`'s fallback target writes into the void: invisible but legal.
+  # Keeps espflash-monitor working in dev when USB-Serial-JTAG ROM mode
+  # is active before the firmware switches to OTG_FS.
+  "esp-println/auto",
   "esp-rtos/esp32s3",
 ]
 heltec_v3_uart = [
@@ -185,6 +199,11 @@ heltec_v3_uart = [
   "esp-bootloader-esp-idf/esp32s3",
   "esp-hal/esp32s3",
   "esp-println/esp32s3",
+  # UART0 IS the host protocol wire on this board. `no-op` discards all
+  # esp-println / defmt output so error-level logs or panic backtraces
+  # cannot corrupt frames mid-flight. Use `debug-checkpoint` for
+  # development diagnostics (LED-blink pattern instead of log bytes).
+  "esp-println/no-op",
   "esp-rtos/esp32s3",
 ]
 heltec_v4 = [
@@ -199,6 +218,8 @@ heltec_v4 = [
   "esp-bootloader-esp-idf/esp32s3",
   "esp-hal/esp32s3",
   "esp-println/esp32s3",
+  # Native USB CDC-ACM — same rationale as heltec_v3.
+  "esp-println/auto",
   "esp-rtos/esp32s3",
 ]
 elecrow_thinknode_m2 = [
@@ -213,6 +234,8 @@ elecrow_thinknode_m2 = [
   "esp-bootloader-esp-idf/esp32s3",
   "esp-hal/esp32s3",
   "esp-println/esp32s3",
+  # UART0 IS the host protocol wire — see heltec_v3_uart rationale.
+  "esp-println/no-op",
   "esp-rtos/esp32s3",
 ]
 lilygo_tbeam_supreme = [
@@ -227,6 +250,8 @@ lilygo_tbeam_supreme = [
   "esp-bootloader-esp-idf/esp32s3",
   "esp-hal/esp32s3",
   "esp-println/esp32s3",
+  # Native USB CDC-ACM — same rationale as heltec_v3.
+  "esp-println/auto",
   "esp-rtos/esp32s3",
 ]
 lilygo_tbeam = [
@@ -241,6 +266,9 @@ lilygo_tbeam = [
   "esp-bootloader-esp-idf/esp32",
   "esp-hal/esp32",
   "esp-println/esp32",
+  # ESP32 classic has no USB-Serial-JTAG peripheral — `auto` would
+  # unconditionally route to UART0 = host protocol wire. Use `no-op`.
+  "esp-println/no-op",
   "esp-rtos/esp32",
 ]
 rak_wisblock_4631 = [

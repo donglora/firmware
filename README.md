@@ -68,3 +68,30 @@ in the [donglora-protocol](https://github.com/donglora/protocol-rs) repo
 (crates.io: [`donglora-protocol`](https://crates.io/crates/donglora-protocol))
 for the complete wire format specification — that is the canonical home;
 this firmware just consumes it.
+
+## Trust model and identifiers
+
+DongLoRa is a **transparent LoRa bridge**, not a security boundary:
+
+- **No authentication on the host transport.** Anything that can write
+  to the CDC-ACM endpoint or UART pins drives the radio. Physical USB
+  attachment is the trust boundary.
+- **No RF-regulatory enforcement.** Frequency, sync word, and TX power
+  are whatever the host sends, within the chip's hardware range.
+  Regional compliance (FCC / CE / ETSI / duty cycle) is the user's
+  responsibility, not the firmware's.
+- **Device identifier exposed without authentication.** The board's
+  6-byte MAC (factory-burned, permanent) is published in two places
+  readable by anyone who can enumerate or open the device:
+    1. The USB CDC-ACM `iSerialNumber` string descriptor (12 hex
+       chars, uppercase). Visible to any OS / userspace process that
+       can read USB device descriptors.
+    2. The `GET_INFO.mcu_uid` field on the wire, available to any
+       host that can issue protocol frames.
+
+  This is intentional — host-side tools (`donglora-mux`,
+  `client-py`, etc.) rely on it to distinguish multiple dongles on
+  one host. The privacy trade-off: a user reusing the same dongle
+  across different hosts/networks is correlatable by that MAC across
+  contexts. If that matters in your threat model, isolate the dongle
+  per context or run it behind a trusted multiplexer.
